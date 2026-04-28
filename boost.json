@@ -1,8 +1,8 @@
 {
     "agents": [
-        "junie",
         "cursor",
         "claude_code",
+        "copilot",
         "opencode"
     ],
     "guidelines": true,
@@ -10,6 +10,7 @@
     "nightwatch_mcp": false,
     "sail": false,
     "skills": [
+        "ai-sdk-development",
         "fortify-development",
         "laravel-best-practices",
         "fluxui-development",
