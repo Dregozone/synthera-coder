@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\ChatMessage;
 use App\Models\ChatSession;
 
 class ChatService
@@ -37,13 +38,49 @@ class ChatService
     }
 
     public function sendMessage(
+        int $sessionId,
         string $type,
         string $model,
         string $message
     ): void {
-        // Implement the logic to send a message using the specified type, model, and message.
-        dd(
-            "ChatService->sendMessage called with type: $type, model: $model, message: $message",
+        // Log the users message in the database
+        $this->addMessage(
+            sessionId: $sessionId,
+            type: $type,
+            by: 'user',
+            content: $message,
         );
+
+        // Process the users message
+        ////
+        
+        // dd(
+        //     "ChatService->sendMessage called with type: $type, model: $model, message: $message",
+        // );
+    }
+
+    public function addMessage(
+        int $sessionId,
+        string $type,
+        string $by,
+        string $content,
+    ): void {
+        // Implement the logic to add a message to the specified chat session.
+        ChatMessage::create([
+             'chat_session_id' => $sessionId,
+             'type' => $type,
+             'by' => $by,
+             'content' => $content,
+        ]);
+    }
+
+    public function getMessagesForSession(int $sessionId): array
+    {
+        // Implement the logic to retrieve messages for the specified chat session.
+        return ChatMessage::query()
+            ->where('chat_session_id', $sessionId)
+            ->orderBy('created_at', 'asc')
+            ->get()
+            ->toArray();
     }
 }

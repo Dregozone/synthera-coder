@@ -2,7 +2,9 @@
 
 namespace App\Models;
 
+use App\Models\ChatMessage;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class ChatSession extends Model
 {
@@ -15,4 +17,9 @@ class ChatSession extends Model
         'current_model',
         'current_chat_type',
     ];
+
+    public function messages(): HasMany
+    {
+        return $this->hasMany(ChatMessage::class);
+    }
 }
