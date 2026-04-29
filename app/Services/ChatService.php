@@ -92,6 +92,48 @@ class ChatService
         return $tasksArr;
     }
 
+    public function workOnTask(
+        int $sessionId,
+        string $type,
+        string $model,
+        string $message,
+        array $tasks,
+        string $task
+    ): void {
+        set_time_limit(300);
+
+        // Adjust task index since the UI is 1 indexed but arrays are 0 indexed
+        $task = $task - 1;
+
+        $agent = $this->findAgent($model, $sessionId);
+
+        if ($agent == '') {
+            return;
+        }
+
+        // Process the users message
+        $instructions = '
+            I will provide you the original user message, this has already been broken into smaller chunks, 
+            please only tackle the parts relevant to the current task. 
+            Only return the solution for this particular task do not try to solve other tasks. 
+            If there are no tasks return "No tasks".
+            If the task is unclear, return "Reframe your question".
+            User message: ' . $message . '.
+            Here is the current task that I want you to work on: ' . $tasks[$task] . '.
+        ';
+        
+        $response = $agent
+            ->prompt($instructions);
+
+        // Log the response from the agent after working on the task
+        $this->addMessage(
+            sessionId: $sessionId,
+            type: $type,
+            by: 'assistant',
+            content: "### Worked on task #" . ($task + 1) . "<br />" . $response,
+        );
+    }
+
     public function findAssistantResponse(
         int $sessionId,
         string $type,

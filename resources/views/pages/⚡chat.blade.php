@@ -36,6 +36,8 @@ new #[Title('Agentic Chat')] class extends Component
     public string $prompt = '';
 
     public array $tasks = [];
+
+    public array $taskStatuses = [];
     
     #[Computed]
     public function messages(): Collection
@@ -140,7 +142,7 @@ new #[Title('Agentic Chat')] class extends Component
         $this->tasks = [
             'Building task list...',
         ];
-        
+
         $chatService->sendMessage(
             sessionId: $this->sessionId,
             type: $this->currentChatType,
@@ -164,6 +166,11 @@ new #[Title('Agentic Chat')] class extends Component
 
         $this->tasks = $tasks;
 
+        $this->taskStatuses = [];
+        foreach ($tasks as $index => $task) {
+            $this->taskStatuses[$index] = 'Pending';
+        }
+
         $this->dispatch('scroll-to-bottom');
     }
 
@@ -178,6 +185,24 @@ new #[Title('Agentic Chat')] class extends Component
         );
 
         $this->checkSessionNumberOfMessages();
+
+        $this->dispatch('scroll-to-bottom');
+    }
+
+    public function workOnTask(ChatService $chatService, string $taskNum): void
+    {
+        $chatService->workOnTask(
+            sessionId: $this->sessionId,
+            type: $this->currentChatType,
+            model: $this->currentModel,
+            message: $taskNum,
+            tasks: $this->tasks,
+            task: $taskNum,
+        );
+
+        $this->checkSessionNumberOfMessages();
+
+        $this->taskStatuses[$taskNum] = 'Done';
 
         $this->dispatch('scroll-to-bottom');
     }
@@ -231,6 +256,8 @@ new #[Title('Agentic Chat')] class extends Component
                 console.log('We are currently working on task number ' + taskNumber);
 
                 console.log('The current task is: ' + $wire.tasks[i]);
+
+                await $wire.workOnTask(taskNumber);
             }
 
             // Only then fetch the assistant response
@@ -424,8 +451,15 @@ new #[Title('Agentic Chat')] class extends Component
                 <flux:subheading>Tasks</flux:subheading>
 
                 <ol class="mt-2 list-decimal list-inside text-sm text-zinc-700 dark:text-zinc-300">
-                    @forelse ($tasks as $task)
-                        <li>{{ $task }}</li>
+                    @forelse ($tasks as $index => $task)
+                        <li 
+                            @class([
+                                'line-through' => isset($taskStatuses[$index + 1]) && $taskStatuses[$index + 1] == 'Done',
+                                'text-zinc-500 dark:text-zinc-400' => ! isset($taskStatuses[$index + 1]) || $taskStatuses[$index + 1] != 'Done',
+                            ])
+                        >
+                            {{ $task }}
+                        </li>
                     @empty
                         <div class="italic text-zinc-500 dark:text-zinc-400">Awaiting tasks...</div>
                     @endforelse
