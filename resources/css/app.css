@@ -52,7 +52,7 @@
 }
 
 [data-flux-label] {
-    @apply  !mb-0 !leading-tight;
+    @apply !mb-0 !leading-tight;
 }
 
 input:focus[data-flux-control],
@@ -64,3 +64,183 @@ select:focus[data-flux-control] {
 /* \[:where(&)\]:size-4 {
     @apply size-4;
 } */
+
+/* Chat markdown rendering */
+.chat-markdown {
+    font-size: 0.875rem;
+    line-height: 1.65;
+
+    & p {
+        margin-bottom: 0.65rem;
+    }
+
+    & p:last-child {
+        margin-bottom: 0;
+    }
+
+    & h1,
+    & h2,
+    & h3,
+    & h4,
+    & h5,
+    & h6 {
+        font-weight: 600;
+        margin-top: 1.25rem;
+        margin-bottom: 0.5rem;
+        line-height: 1.25;
+    }
+
+    & h1:first-child,
+    & h2:first-child,
+    & h3:first-child {
+        margin-top: 0;
+    }
+
+    & h1 {
+        font-size: 1.375rem;
+    }
+
+    & h2 {
+        font-size: 1.2rem;
+    }
+
+    & h3 {
+        font-size: 1.05rem;
+    }
+
+    & ul {
+        list-style-type: disc;
+        padding-left: 1.4rem;
+        margin-bottom: 0.65rem;
+    }
+
+    & ol {
+        list-style-type: decimal;
+        padding-left: 1.4rem;
+        margin-bottom: 0.65rem;
+    }
+
+    & li {
+        margin-bottom: 0.2rem;
+    }
+
+    & li>ul,
+    & li>ol {
+        margin-top: 0.2rem;
+        margin-bottom: 0;
+    }
+
+    & pre {
+        /* Box around code */
+        /* background-color: #1a1b26; */
+        color: #c0caf5;
+        border-radius: 0.5rem;
+        padding: 1rem 1.25rem;
+        margin-bottom: 0.75rem;
+        overflow-x: auto;
+        font-size: 0.8125rem;
+        line-height: 1.7;
+        font-family: ui-monospace, 'Cascadia Code', 'Fira Code', monospace;
+    }
+
+    & pre code {
+        background: none;
+        padding: 0;
+        border-radius: 0;
+        color: inherit;
+        font-size: inherit;
+        font-family: inherit;
+    }
+
+    & code {
+        background-color: rgba(0, 0, 0, 0.07);
+        padding: 0.15rem 0.4rem;
+        border-radius: 0.3rem;
+        font-size: 0.8125em;
+        font-family: ui-monospace, 'Cascadia Code', 'Fira Code', monospace;
+    }
+
+    & blockquote {
+        border-left: 3px solid #a3a3a3;
+        padding-left: 1rem;
+        margin-bottom: 0.75rem;
+        color: #737373;
+        font-style: italic;
+    }
+
+    & table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 0.75rem;
+        font-size: 0.8125rem;
+    }
+
+    & th {
+        border: 1px solid #d4d4d4;
+        padding: 0.4rem 0.75rem;
+        text-align: left;
+        font-weight: 600;
+        background-color: rgba(0, 0, 0, 0.04);
+    }
+
+    & td {
+        border: 1px solid #d4d4d4;
+        padding: 0.4rem 0.75rem;
+    }
+
+    & a {
+        color: #7c3aed;
+        text-decoration: underline;
+        text-underline-offset: 2px;
+    }
+
+    & a:hover {
+        color: #6d28d9;
+    }
+
+    & hr {
+        border: none;
+        border-top: 1px solid #e5e5e5;
+        margin: 1rem 0;
+    }
+
+    & strong {
+        font-weight: 600;
+    }
+
+    & em {
+        font-style: italic;
+    }
+}
+
+.dark .chat-markdown {
+    & code {
+        /* background-color: rgba(255, 255, 255, 0.1); */
+    }
+
+    & blockquote {
+        border-left-color: #525252;
+        color: #a3a3a3;
+    }
+
+    & th {
+        border-color: #404040;
+        background-color: rgba(255, 255, 255, 0.05);
+    }
+
+    & td {
+        border-color: #404040;
+    }
+
+    & a {
+        color: #a78bfa;
+    }
+
+    & a:hover {
+        color: #c4b5fd;
+    }
+
+    & hr {
+        border-top-color: #404040;
+    }
+}

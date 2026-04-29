@@ -2,6 +2,9 @@
 
 namespace App\Ai\Agents;
 
+use Laravel\Ai\Attributes\Model;
+use Laravel\Ai\Attributes\Provider;
+use Laravel\Ai\Attributes\Timeout;
 use Laravel\Ai\Contracts\Agent;
 use Laravel\Ai\Contracts\Conversational;
 use Laravel\Ai\Contracts\HasTools;
@@ -9,12 +12,11 @@ use Laravel\Ai\Contracts\Tool;
 use Laravel\Ai\Enums\Lab;
 use Laravel\Ai\Messages\Message;
 use Laravel\Ai\Promptable;
-use Laravel\Ai\Attributes\Model;
-use Laravel\Ai\Attributes\Provider;
 use Stringable;
 
 #[Provider(Lab::Ollama)]
 #[Model('qwen3:8b-8k')]
+#[Timeout(120)]
 class Qwen3_8b_8k implements Agent, Conversational, HasTools
 {
     use Promptable;

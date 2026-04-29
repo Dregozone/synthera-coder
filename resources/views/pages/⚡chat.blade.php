@@ -31,7 +31,11 @@ new #[Title('Agentic Chat')] class extends Component
 
     public int $numberOfMessages = 0;
 
+    public string $originalPrompt = '';
+
     public string $prompt = '';
+
+    public array $tasks = [];
     
     #[Computed]
     public function messages(): Collection
@@ -136,7 +140,43 @@ new #[Title('Agentic Chat')] class extends Component
             sessionId: $this->sessionId,
             type: $this->currentChatType,
             model: $this->currentModel,
-            message: $this->prompt,
+            message: $this->originalPrompt,
+        );
+
+        $this->checkSessionNumberOfMessages();
+
+        $this->dispatch('scroll-to-bottom');
+    }
+
+    public function updateTasks(ChatService $chatService): void
+    {
+        // Clear out the old tasks
+        $this->tasks = [
+            'Building task list...',
+        ];
+
+        $tasks = $chatService->updateTasks(
+            sessionId: $this->sessionId,
+            type: $this->currentChatType,
+            model: $this->currentModel,
+            message: $this->originalPrompt,
+        );
+
+        dd('chat:updateTasks returned', $tasks);
+
+        // $this->tasks = $tasks;
+
+        // $this->dispatch('scroll-to-bottom');
+    }
+
+    public function findAssistantResponse(ChatService $chatService): void
+    {
+        $chatService->findAssistantResponse(
+            sessionId: $this->sessionId,
+            type: $this->currentChatType,
+            model: $this->currentModel,
+            message: $this->originalPrompt,
+            originalPrompt: $this->originalPrompt,
         );
 
         $this->checkSessionNumberOfMessages();
@@ -173,10 +213,21 @@ new #[Title('Agentic Chat')] class extends Component
             }
         },
 
-        sendMessage() {
+        async sendMessage() {
             if ($wire.prompt.trim() === '') return;
 
-            @this.sendMessage()
+            // Reset the prompt input immediately (instant client-side feedback)
+            $wire.originalPrompt = $wire.prompt;
+            $wire.prompt = '';
+
+            // Add the users message and wait for it to be persisted
+            await $wire.sendMessage();
+
+            // Based on the users message, derive a tasks list
+            await $wire.updateTasks();
+
+            // Only then fetch the assistant response
+            await $wire.findAssistantResponse();
         }
     }"
     id="container" 
@@ -210,16 +261,36 @@ new #[Title('Agentic Chat')] class extends Component
                             </flux:callout>
 
                         @elseif ($message['by'] === 'user')
-                            <flux:card>
-                                user msg
-                                @dump($message->getAttributes())
-                            </flux:card>
+                            <div class="flex items-start gap-3 max-w-[75%]">
+                                <div class="flex-shrink-0 size-8 rounded-full bg-zinc-200 dark:bg-zinc-700 flex items-center justify-center ring-1 ring-zinc-300 dark:ring-zinc-600">
+                                    <flux:icon.user class="size-4 text-zinc-600 dark:text-zinc-300" />
+                                </div>
+                                <div class="flex flex-col gap-1 min-w-0">
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-xs font-semibold text-zinc-700 dark:text-zinc-300">You</span>
+                                        <span class="text-xs text-zinc-400 dark:text-zinc-500">{{ $message['created_at']->diffForHumans() }}</span>
+                                    </div>
+                                    <div class="bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-2xl rounded-tl-sm px-4 py-3">
+                                        <p class="text-sm leading-relaxed text-zinc-800 dark:text-zinc-200 whitespace-pre-wrap break-words">{{ $message['content'] }}</p>
+                                    </div>
+                                </div>
+                            </div>
 
                         @else
-                            <flux:card>
-                                assistant msg
-                                @dump($message->getAttributes())
-                            </flux:card>
+                            <div class="flex items-start gap-3 max-w-[75%] flex-row-reverse">
+                                <div class="flex-shrink-0 size-8 rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-sm ring-1 ring-violet-400/30">
+                                    <flux:icon.cpu-chip class="size-4 text-white" />
+                                </div>
+                                <div class="flex flex-col gap-1 items-end min-w-0 w-full">
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-xs text-zinc-400 dark:text-zinc-500">{{ $message['created_at']->diffForHumans() }}</span>
+                                        <span class="text-xs font-semibold text-violet-600 dark:text-violet-400">Synthera</span>
+                                    </div>
+                                    <div class="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl rounded-tr-sm px-5 py-4 shadow-sm">
+                                        <div class="chat-markdown text-zinc-800 dark:text-zinc-200">{!! Str::markdown($message['content'], ['html_input' => 'strip', 'allow_unsafe_links' => false]) !!}</div>
+                                    </div>
+                                </div>
+                            </div>
                         @endif
 
                     </div>
@@ -253,6 +324,16 @@ new #[Title('Agentic Chat')] class extends Component
         {{-- Heading/title --}}
         <div class="w-full my-4 px-4">
             <div class="flex items-center gap-2 mb-2">
+                <flux:modal.trigger name="select-chat">
+                    <flux:button 
+                        size="sm" 
+                        variant="ghost" 
+                        icon="arrow-left"
+                    />
+                </flux:modal.trigger>
+
+                @include('pages.includes.select-chat')
+
                 <flux:badge>#{{ $sessionId }}</flux:badge>
                 <flux:heading level="1" size="xl">
                     {{ $sessionTitle ?: 'New Chat Session' }}
