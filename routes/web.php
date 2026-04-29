@@ -23,6 +23,8 @@ Route::get('/test', function () {
 
 
 Route::get('/test-tasks', function () {
+    set_time_limit(300);
+    
     $agent = new Qwen3_8b_8k;
 
     $message = "

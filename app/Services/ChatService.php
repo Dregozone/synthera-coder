@@ -59,7 +59,7 @@ class ChatService
         string $model,
         string $message,
     ): array {
-        set_time_limit(180);
+        set_time_limit(300);
 
         $agent = $this->findAgent($model, $sessionId);
 
@@ -79,20 +79,17 @@ class ChatService
         $response = $agent
             ->prompt($instructions . $message);
 
-        dd($response->text);
+        $tasksArr = explode('|', $response->text);
 
-        // $this->addMessage(
-        //     sessionId: $sessionId,
-        //     type: $type,
-        //     by: 'assistant',
-        //     content: $response,
-        // );
+        // Log the tasks that have been derived from the users message
+        $this->addMessage(
+            sessionId: $sessionId,
+            type: 'info',
+            by: 'assistant',
+            content: "Tasks list updated|" . $response,
+        );
 
-        // dd(
-        //     "ChatService->sendMessage called with type: $type, model: $model, message: $message",
-        // );
-
-        return ['Task 1', 'Task 2',];
+        return $tasksArr;
     }
 
     public function findAssistantResponse(
@@ -102,7 +99,7 @@ class ChatService
         string $message,
         string $originalPrompt,
     ): void {
-        set_time_limit(180);
+        set_time_limit(300);
 
         $agent = $this->findAgent($model, $sessionId);
 

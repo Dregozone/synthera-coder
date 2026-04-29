@@ -16,7 +16,7 @@ use Stringable;
 
 #[Provider(Lab::Ollama)]
 #[Model('qwen3:8b-8k')]
-#[Timeout(120)]
+#[Timeout(300)]
 class Qwen3_8b_8k implements Agent, Conversational, HasTools
 {
     use Promptable;

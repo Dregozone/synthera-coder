@@ -136,6 +136,11 @@ new #[Title('Agentic Chat')] class extends Component
 
     public function sendMessage(ChatService $chatService): void
     {
+        // Clear out the old tasks
+        $this->tasks = [
+            'Building task list...',
+        ];
+        
         $chatService->sendMessage(
             sessionId: $this->sessionId,
             type: $this->currentChatType,
@@ -150,11 +155,6 @@ new #[Title('Agentic Chat')] class extends Component
 
     public function updateTasks(ChatService $chatService): void
     {
-        // Clear out the old tasks
-        $this->tasks = [
-            'Building task list...',
-        ];
-
         $tasks = $chatService->updateTasks(
             sessionId: $this->sessionId,
             type: $this->currentChatType,
@@ -162,11 +162,9 @@ new #[Title('Agentic Chat')] class extends Component
             message: $this->originalPrompt,
         );
 
-        dd('chat:updateTasks returned', $tasks);
+        $this->tasks = $tasks;
 
-        // $this->tasks = $tasks;
-
-        // $this->dispatch('scroll-to-bottom');
+        $this->dispatch('scroll-to-bottom');
     }
 
     public function findAssistantResponse(ChatService $chatService): void
@@ -226,8 +224,17 @@ new #[Title('Agentic Chat')] class extends Component
             // Based on the users message, derive a tasks list
             await $wire.updateTasks();
 
+            console.log('There are currently ' + $wire.tasks.length + ' tasks.');
+
+            for (let i = 0; i < $wire.tasks.length; i++) {
+                let taskNumber = i + 1;
+                console.log('We are currently working on task number ' + taskNumber);
+
+                console.log('The current task is: ' + $wire.tasks[i]);
+            }
+
             // Only then fetch the assistant response
-            await $wire.findAssistantResponse();
+            {{-- await $wire.findAssistantResponse(); --}}
         }
     }"
     id="container" 
@@ -253,11 +260,31 @@ new #[Title('Agentic Chat')] class extends Component
                                 inline
                                 class="w-full max-w-2xl"
                             >
-                                <flux:callout.heading>
-                                    <div>{{ $message['content'] }}</div>
-                                    <flux:spacer />
-                                    <div>{{ $message['created_at']->diffForHumans() }}</div>
-                                </flux:callout.heading>
+
+                                @if (strpos($message['content'], 'Tasks list updated') === 0)
+                                    @php
+                                        // Extract the tasks from the message content
+                                        $tasksList = str_replace('Tasks list updated|', '', $message['content']);
+                                        $tasksArr = explode('|', $tasksList);
+                                    @endphp
+                                    <flux:callout.heading>
+                                        <div class="flex flex-col gap-2">
+                                            <flux:subheading>Tasks list updated</flux:subheading>
+
+                                            <ol class="list-decimal list-inside text-sm">
+                                                @foreach ($tasksArr as $task)
+                                                    <li>{{ $task }}</li>
+                                                @endforeach
+                                            </ol>
+                                        </div>
+                                    </flux:callout.heading>
+                                @else
+                                    <flux:callout.heading>
+                                        <div>{{ $message['content'] }}</div>
+                                        <flux:spacer />
+                                        <div>{{ $message['created_at']->diffForHumans() }}</div>
+                                    </flux:callout.heading>
+                                @endif
                             </flux:callout>
 
                         @elseif ($message['by'] === 'user')
@@ -320,7 +347,7 @@ new #[Title('Agentic Chat')] class extends Component
     </section>
 
     {{-- Right side --}}
-    <section class="w-1/4 h-screen border-l-2 border-zinc-300 dark:border-zinc-700">
+    <section class="w-1/4 h-screen flex flex-col border-l-2 border-zinc-300 dark:border-zinc-700">
         {{-- Heading/title --}}
         <div class="w-full my-4 px-4">
             <div class="flex items-center gap-2 mb-2">
@@ -368,5 +395,73 @@ new #[Title('Agentic Chat')] class extends Component
         </div>
 
         <flux:separator variant="subtle" class="mb-4" />
+
+        <div class="flex flex-col grow">
+            {{-- Context window --}}
+            <flux:card class="mx-2">
+                <flux:subheading>Context Window</flux:subheading>
+
+                Context: x / y (z%)
+            </flux:card>
+
+            {{-- Chat/context actions --}}
+            <flux:card class="mx-2 mt-4">
+                <flux:subheading>Context Actions</flux:subheading>
+
+                <flux:button 
+                    size="sm" 
+                    variant="outline" 
+                    label="Condense Context" 
+                    icon="arrows-pointing-in" 
+                    x-on:click="$wire.sendToast('Condense context functionality not implemented yet.', '', 'danger')"
+                />
+            </flux:card>
+
+            <flux:spacer />
+
+            {{-- Tasks --}}
+            <flux:card class="mx-2">
+                <flux:subheading>Tasks</flux:subheading>
+
+                <ol class="mt-2 list-decimal list-inside text-sm text-zinc-700 dark:text-zinc-300">
+                    @forelse ($tasks as $task)
+                        <li>{{ $task }}</li>
+                    @empty
+                        <div class="italic text-zinc-500 dark:text-zinc-400">Awaiting tasks...</div>
+                    @endforelse
+                </ol> 
+            </flux:card>
+
+            <flux:spacer />
+            <flux:spacer />
+
+            {{-- Agents hot/cold: We want to show which agent is currently warmed up, cold starts can delay the response 30s - 1min --}}
+            <flux:card class="mx-2">
+                <flux:subheading>Agents Cold Start Status</flux:subheading>
+
+                @foreach ($availableModels as $model)
+                    <div>
+                        [Status] {{ $model }}
+                    </div>
+                @endforeach
+            </flux:card>
+
+            <flux:card class="rounded-none !px-6 !py-3 border-t-2 border-zinc-300 dark:border-zinc-700 mt-4">
+                <flux:text class="w-full text-center text-xs text-zinc-500 dark:text-zinc-400">
+                    Synthera Coder - 
+                    
+                    <flux:link
+                        href="https://glacialstudio.co.uk?ref=synthera-coder"
+                        target="_blank"
+                        rel="noreferrer"
+                        class="text-zinc-500 dark:text-zinc-400 hover:underline"
+                    >
+                        Glacial Studio
+                    </flux:link> 
+                    
+                    &copy; {{ date('Y') }} - Version: 0.0.1
+                </flux:text>
+            </flux:card>
+        </div>
     </section>
 </div>
