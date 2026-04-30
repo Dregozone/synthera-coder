@@ -11,7 +11,7 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('chat_messages', function (Blueprint $table) {
+        Schema::create('chat_messages', function (Blueprint $table): void {
             $table->id();
             $table->foreignId('chat_session_id')->constrained()->onDelete('cascade');
             $table->string('type');

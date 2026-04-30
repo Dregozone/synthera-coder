@@ -5,7 +5,7 @@ return [
         'qwen3:8b-8k',
         'qwen3:14b-16k',
     ],
-    
+
     'default_chat_model' => 'qwen3:8b-8k',
 
     'chat_types' => [

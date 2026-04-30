@@ -11,7 +11,7 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('chat_sessions', function (Blueprint $table) {
+        Schema::create('chat_sessions', function (Blueprint $table): void {
             $table->id();
             $table->string('title')->nullable();
             $table->integer('number_of_messages')->default(0);
