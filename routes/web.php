@@ -7,11 +7,11 @@ Route::livewire('/', 'pages::chat')->name('home');
 
 // Route::view('/', 'welcome')->name('home');
 
-Route::middleware(['auth', 'verified'])->group(function (): void {
-    Route::view('dashboard', 'dashboard')->name('dashboard');
-});
+// Route::middleware(['auth', 'verified'])->group(function (): void {
+//     Route::view('dashboard', 'dashboard')->name('dashboard');
+// });
 
-require __DIR__.'/settings.php';
+// require __DIR__.'/settings.php';
 
 Route::get('/test', function () {
     $response = (new Qwen3_8b_8k)
