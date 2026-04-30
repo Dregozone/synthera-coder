@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Ai\Agents\Qwen3_8b_8k;
 use App\Models\ChatMessage;
 use App\Models\ChatSession;
+use Illuminate\Support\Facades\DB;
 
 class ChatService
 {
@@ -75,18 +76,21 @@ class ChatService
             If the message is unclear, return "Reframe your question".
             Please delimit the tasks with a "|" pipe character. User message: 
         ';
-        
-        $response = $agent
-            ->prompt($instructions . $message);
 
-        $tasksArr = explode('|', $response->text);
+        $response = $agent
+            ->prompt($instructions.$message);
+
+        $tasksArr = array_values(array_filter(
+            array_map('trim', explode('|', $response->text)),
+            static fn (string $task): bool => $task !== '',
+        ));
 
         // Log the tasks that have been derived from the users message
         $this->addMessage(
             sessionId: $sessionId,
             type: 'info',
             by: 'assistant',
-            content: "Tasks list updated|" . $response,
+            content: 'Tasks list updated|'.$response->text,
         );
 
         return $tasksArr;
@@ -98,12 +102,16 @@ class ChatService
         string $model,
         string $message,
         array $tasks,
-        string $task
+        int $task
     ): void {
         set_time_limit(300);
 
         // Adjust task index since the UI is 1 indexed but arrays are 0 indexed
-        $task = $task - 1;
+        $taskIndex = $task - 1;
+
+        if (! isset($tasks[$taskIndex])) {
+            return;
+        }
 
         $agent = $this->findAgent($model, $sessionId);
 
@@ -118,10 +126,10 @@ class ChatService
             Only return the solution for this particular task do not try to solve other tasks. 
             If there are no tasks return "No tasks".
             If the task is unclear, return "Reframe your question".
-            User message: ' . $message . '.
-            Here is the current task that I want you to work on: ' . $tasks[$task] . '.
+            User message: '.$message.'.
+            Here is the current task that I want you to work on: '.$tasks[$taskIndex].'.
         ';
-        
+
         $response = $agent
             ->prompt($instructions);
 
@@ -130,7 +138,7 @@ class ChatService
             sessionId: $sessionId,
             type: $type,
             by: 'assistant',
-            content: "### Worked on task #" . ($task + 1) . "<br />" . $response,
+            content: "### Worked on task #{$task}\n\n{$response->text}",
         );
     }
 
@@ -171,13 +179,19 @@ class ChatService
         string $by,
         string $content,
     ): void {
-        // Implement the logic to add a message to the specified chat session.
         ChatMessage::create([
             'chat_session_id' => $sessionId,
             'type' => $type,
             'by' => $by,
             'content' => $content,
         ]);
+
+        ChatSession::query()
+            ->whereKey($sessionId)
+            ->update([
+                'number_of_messages' => DB::raw('COALESCE(number_of_messages, 0) + 1'),
+                'updated_at' => now(),
+            ]);
     }
 
     public function getMessagesForSession(int $sessionId): array

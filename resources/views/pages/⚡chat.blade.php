@@ -12,8 +12,12 @@ use Livewire\Component;
 
 new #[Title('Agentic Chat')] class extends Component
 {
+    private const MESSAGE_BATCH_SIZE = 50;
+
     #[Url]
     public int $sessionId = 0;
+
+    public int $visibleMessageCount = self::MESSAGE_BATCH_SIZE;
 
     public array $availableModels = [];
 
@@ -42,12 +46,33 @@ new #[Title('Agentic Chat')] class extends Component
     #[Computed]
     public function messages(): Collection
     {
-        return ChatMessage::where('chat_session_id', $this->sessionId)
-            ->orderBy('created_at')
+        return ChatMessage::query()
+            ->select(['id', 'chat_session_id', 'type', 'by', 'content', 'created_at'])
+            ->where('chat_session_id', $this->sessionId)
+            ->latest('id')
+            ->limit($this->visibleMessageCount)
+            ->get()
+            ->reverse()
+            ->values();
+    }
+
+    #[Computed]
+    public function hiddenMessageCount(): int
+    {
+        return max(0, $this->numberOfMessages - $this->messages->count());
+    }
+
+    #[Computed]
+    public function recentSessions(): Collection
+    {
+        return ChatSession::query()
+            ->select(['id', 'title', 'number_of_messages', 'created_at', 'updated_at'])
+            ->latest('updated_at')
+            ->limit(10)
             ->get();
     }
 
-    public function mount(): void
+    public function mount(ChatService $chatService): void
     {
         // Ensure the user has a valid session ID to track their chat session. This allows them to leave and come back without losing their place.
         if (! $this->sessionId) {
@@ -58,8 +83,6 @@ new #[Title('Agentic Chat')] class extends Component
         }
 
         // First time the page loads actions
-        $chatService = app(ChatService::class);
-
         // 1 in 10 full page loads (Not livewire re-renders) will perform these maintenance tasks
         Lottery::odds(1, 10)
             ->winner(function () use ($chatService) {
@@ -67,28 +90,44 @@ new #[Title('Agentic Chat')] class extends Component
             })
             ->choose();
 
-        $this->loadSessionData();
-
         $this->availableModels = config('synthera-coder.chat_models', []);
         $this->defaultModel = config('synthera-coder.default_chat_model', '');
-
         $this->currentModel = $this->defaultModel;
 
         $this->availableChatTypes = config('synthera-coder.chat_types', []);
         $this->defaultChatType = config('synthera-coder.default_chat_type', '');
         $this->currentChatType = $this->defaultChatType;
+
+        $this->loadSessionData();
     }
 
     private function loadSessionData(): void
     {
-        $session = ChatSession::find($this->sessionId);
+        $session = ChatSession::query()
+            ->select(['id', 'title', 'number_of_messages', 'current_model', 'current_chat_type'])
+            ->find($this->sessionId);
 
         if ($session) {
-            $this->currentModel = $session->current_model ?? $this->defaultModel;
-            $this->currentChatType = $session->current_chat_type ?? $this->defaultChatType;
+            $this->currentModel = $session->current_model ?: $this->defaultModel;
+            $this->currentChatType = $session->current_chat_type ?: $this->defaultChatType;
             $this->sessionTitle = $session->title ?? '';
             $this->numberOfMessages = $session->number_of_messages ?? 0;
         }
+    }
+
+    private function syncSessionConfiguration(): void
+    {
+        ChatSession::query()
+            ->whereKey($this->sessionId)
+            ->update([
+                'current_model' => $this->currentModel,
+                'current_chat_type' => $this->currentChatType,
+            ]);
+    }
+
+    public function loadOlderMessages(): void
+    {
+        $this->visibleMessageCount += self::MESSAGE_BATCH_SIZE;
     }
 
     public function saveSessionTitle(): void
@@ -120,20 +159,7 @@ new #[Title('Agentic Chat')] class extends Component
             content: $content,
         );
 
-        $this->checkSessionNumberOfMessages();
-    }
-
-    private function checkSessionNumberOfMessages(): void
-    {
-        $session = ChatSession::find($this->sessionId);
-
-        $sessionMessages = ChatMessage::where('chat_session_id', $this->sessionId)->count();
-        
-        if ($session) {
-            $session->update(['number_of_messages' => $sessionMessages]);
-        }
-
-        $this->numberOfMessages = $sessionMessages ?? 0;
+        $this->loadSessionData();
     }
 
     public function sendMessage(ChatService $chatService): void
@@ -143,6 +169,8 @@ new #[Title('Agentic Chat')] class extends Component
             'Building task list...',
         ];
 
+        $this->syncSessionConfiguration();
+
         $chatService->sendMessage(
             sessionId: $this->sessionId,
             type: $this->currentChatType,
@@ -150,13 +178,15 @@ new #[Title('Agentic Chat')] class extends Component
             message: $this->originalPrompt,
         );
 
-        $this->checkSessionNumberOfMessages();
+        $this->loadSessionData();
 
         $this->dispatch('scroll-to-bottom');
     }
 
     public function updateTasks(ChatService $chatService): void
     {
+        $this->syncSessionConfiguration();
+
         $tasks = $chatService->updateTasks(
             sessionId: $this->sessionId,
             type: $this->currentChatType,
@@ -168,14 +198,18 @@ new #[Title('Agentic Chat')] class extends Component
 
         $this->taskStatuses = [];
         foreach ($tasks as $index => $task) {
-            $this->taskStatuses[$index] = 'Pending';
+            $this->taskStatuses[$index + 1] = 'Pending';
         }
+
+        $this->loadSessionData();
 
         $this->dispatch('scroll-to-bottom');
     }
 
     public function findAssistantResponse(ChatService $chatService): void
     {
+        $this->syncSessionConfiguration();
+
         $chatService->findAssistantResponse(
             sessionId: $this->sessionId,
             type: $this->currentChatType,
@@ -184,23 +218,25 @@ new #[Title('Agentic Chat')] class extends Component
             originalPrompt: $this->originalPrompt,
         );
 
-        $this->checkSessionNumberOfMessages();
+        $this->loadSessionData();
 
         $this->dispatch('scroll-to-bottom');
     }
 
-    public function workOnTask(ChatService $chatService, string $taskNum): void
+    public function workOnTask(ChatService $chatService, int $taskNum): void
     {
+        $this->syncSessionConfiguration();
+
         $chatService->workOnTask(
             sessionId: $this->sessionId,
             type: $this->currentChatType,
             model: $this->currentModel,
-            message: $taskNum,
+            message: $this->originalPrompt,
             tasks: $this->tasks,
             task: $taskNum,
         );
 
-        $this->checkSessionNumberOfMessages();
+        $this->loadSessionData();
 
         $this->taskStatuses[$taskNum] = 'Done';
 
@@ -249,13 +285,8 @@ new #[Title('Agentic Chat')] class extends Component
             // Based on the users message, derive a tasks list
             await $wire.updateTasks();
 
-            console.log('There are currently ' + $wire.tasks.length + ' tasks.');
-
             for (let i = 0; i < $wire.tasks.length; i++) {
                 let taskNumber = i + 1;
-                console.log('We are currently working on task number ' + taskNumber);
-
-                console.log('The current task is: ' + $wire.tasks[i]);
 
                 await $wire.workOnTask(taskNumber);
             }
@@ -277,8 +308,16 @@ new #[Title('Agentic Chat')] class extends Component
             class="grow ml-4 mb-4 p-4 border border-zinc-300 dark:border-zinc-700 rounded-2xl shadow-lg overflow-y-auto"
         >
             <div class="w-full">
+                @if ($this->hiddenMessageCount > 0)
+                    <div class="mb-4 flex justify-center">
+                        <flux:button wire:click="loadOlderMessages" size="sm" variant="ghost">
+                            Load {{ $this->hiddenMessageCount }} older {{ Str::plural('message', $this->hiddenMessageCount) }}
+                        </flux:button>
+                    </div>
+                @endif
+
                 @foreach ($this->messages as $index => $message)
-                    <div class="flex w-full mb-3 {{ $message['type'] === 'info' ? 'justify-center' : ($message['by'] === 'user' ? 'justify-start' : 'justify-end') }}">
+                    <div wire:key="message-{{ $message->id }}" class="flex w-full mb-3 {{ $message['type'] === 'info' ? 'justify-center' : ($message['by'] === 'user' ? 'justify-start' : 'justify-end') }}">
 
                         @if ($message['type'] === 'info')
                             <flux:callout 
@@ -386,7 +425,7 @@ new #[Title('Agentic Chat')] class extends Component
                     />
                 </flux:modal.trigger>
 
-                @include('pages.includes.select-chat')
+                @include('pages.includes.select-chat', ['chatSessions' => $this->recentSessions])
 
                 <flux:badge>#{{ $sessionId }}</flux:badge>
                 <flux:heading level="1" size="xl">
@@ -452,7 +491,8 @@ new #[Title('Agentic Chat')] class extends Component
 
                 <ol class="mt-2 list-decimal list-inside text-sm text-zinc-700 dark:text-zinc-300">
                     @forelse ($tasks as $index => $task)
-                        <li 
+                        <li
+                            wire:key="task-{{ $index + 1 }}"
                             @class([
                                 'line-through' => isset($taskStatuses[$index + 1]) && $taskStatuses[$index + 1] == 'Done',
                                 'text-zinc-500 dark:text-zinc-400' => ! isset($taskStatuses[$index + 1]) || $taskStatuses[$index + 1] != 'Done',
