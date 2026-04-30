@@ -243,6 +243,37 @@ new #[Title('Agentic Chat')] class extends Component
         $this->dispatch('scroll-to-bottom');
     }
 
+    public function startOnTask(ChatService $chatService, int $taskNum): void
+    {
+        $this->taskStatuses[$taskNum] = 'In Progress';
+
+        $this->addMessage(
+            type: $this->currentChatType,
+            by: 'assistant', 
+            content: "Starting task $taskNum: " . ($this->tasks[$taskNum - 1] ?? 'Unknown Task')
+        );
+
+        $this->dispatch('scroll-to-bottom');
+    }
+
+    public function assignSessionTitle(ChatService $chatService): void
+    {
+        $this->syncSessionConfiguration();
+
+        $title = $chatService->assignSessionTitle(
+            sessionId: $this->sessionId,
+            type: $this->currentChatType,
+            model: $this->currentModel,
+            message: $this->originalPrompt,
+            tasks: $this->tasks,
+        );
+
+        if ($title) {
+            $this->sessionTitle = $title;
+            $this->saveSessionTitle();
+        }
+    }
+
     public function sendToast(string $message, string $heading = '', string $type = 'success'): void
     {
         if ($heading !== '') {
@@ -285,8 +316,13 @@ new #[Title('Agentic Chat')] class extends Component
             // Based on the users message, derive a tasks list
             await $wire.updateTasks();
 
+            // Based on the task list and the original message, generate and apply a ChatSession title
+            await $wire.assignSessionTitle();
+
             for (let i = 0; i < $wire.tasks.length; i++) {
                 let taskNumber = i + 1;
+
+                await $wire.startOnTask(taskNumber);
 
                 await $wire.workOnTask(taskNumber);
             }
@@ -451,7 +487,8 @@ new #[Title('Agentic Chat')] class extends Component
                     size="sm" 
                     variant="ghost" 
                     icon="plus" 
-                    x-on:click="$wire.sendToast('Create new chat.')" 
+                    {{-- x-on:click="$wire.sendToast('Create new chat.')"  --}}
+                    href="{{ request()->fullUrlWithQuery(['sessionId' => null]) }}"
                 />
             </div>
 

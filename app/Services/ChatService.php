@@ -142,6 +142,36 @@ class ChatService
         );
     }
 
+    public function assignSessionTitle(
+        int $sessionId,
+        string $type,
+        string $model,
+        string $message,
+        array $tasks
+    ): string {
+        set_time_limit(300);
+
+        $agent = $this->findAgent($model, $sessionId);
+
+        if ($agent == '') {
+            return 'Unknown agent';
+        }
+
+        // Process the users message
+        $instructions = '
+            Based on the following user message, generate a concise and descriptive title for this chat session. 
+            The title should be no more than 5 words. 
+            User message: 
+        ';
+
+        $response = $agent
+            ->prompt($instructions.$message);
+
+        $title = $response->text;
+
+        return $title;
+    }
+
     public function findAssistantResponse(
         int $sessionId,
         string $type,
