@@ -81,7 +81,7 @@ class ChatService
             ->prompt($instructions.$message);
 
         $tasksArr = array_values(array_filter(
-            array_map('trim', explode('|', $response->text)),
+            array_map(trim(...), explode('|', $response->text)),
             static fn (string $task): bool => $task !== '',
         ));
 

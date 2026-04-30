@@ -18,7 +18,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withExceptions(function (Exceptions $exceptions): void {
         //
     })
-    ->booting(function () {
+    ->booting(function (): void {
         Model::automaticallyEagerLoadRelationships();
         Model::shouldBeStrict();
         DB::prohibitDestructiveCommands();

@@ -2,7 +2,6 @@
 
 namespace App\Models;
 
-use App\Models\ChatMessage;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 

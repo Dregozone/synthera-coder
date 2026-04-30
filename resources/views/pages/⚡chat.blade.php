@@ -12,7 +12,7 @@ use Livewire\Component;
 
 new #[Title('Agentic Chat')] class extends Component
 {
-    private const MESSAGE_BATCH_SIZE = 50;
+    private const int MESSAGE_BATCH_SIZE = 50;
 
     #[Url]
     public int $sessionId = 0;
@@ -85,7 +85,7 @@ new #[Title('Agentic Chat')] class extends Component
         // First time the page loads actions
         // 1 in 10 full page loads (Not livewire re-renders) will perform these maintenance tasks
         Lottery::odds(1, 10)
-            ->winner(function () use ($chatService) {
+            ->winner(function () use ($chatService): void {
                 $chatService->maintenanceTasks();
             })
             ->choose();

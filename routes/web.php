@@ -7,24 +7,22 @@ Route::livewire('/', 'pages::chat')->name('home');
 
 // Route::view('/', 'welcome')->name('home');
 
-// Route::middleware(['auth', 'verified'])->group(function (): void {
-//     Route::view('dashboard', 'dashboard')->name('dashboard');
-// });
+Route::middleware(['auth', 'verified'])->group(function (): void {
+    Route::view('dashboard', 'dashboard')->name('dashboard');
+});
 
-// require __DIR__.'/settings.php';
+require __DIR__.'/settings.php';
 
 Route::get('/test', function () {
     $response = (new Qwen3_8b_8k)
         ->prompt('Hi there');
- 
+
     return (string) $response;
 });
 
-
-
-Route::get('/test-tasks', function () {
+Route::get('/test-tasks', function (): void {
     set_time_limit(300);
-    
+
     $agent = new Qwen3_8b_8k;
 
     $message = "
@@ -39,9 +37,9 @@ Route::get('/test-tasks', function () {
         If the message is unclear, return "Reframe your question".
         Please delimit the tasks with a "|" pipe character. User message: 
     ';
-    
+
     $response = $agent
-        ->prompt($instructions . $message);
+        ->prompt($instructions.$message);
 
     $tasksArr = explode('|', $response->text);
 
