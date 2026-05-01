@@ -428,7 +428,7 @@ new #[Title('Agentic Chat')] class extends Component
         </div>
 
         <div class="ml-4">
-            <form x-on:submit.prevent="sendMessage()" class="w-full">
+            <form x-on:submit.prevent="sendMessage()" class="w-[60%] mx-auto">
                 <flux:composer 
                     wire:model="prompt" 
                     label="Prompt" 
@@ -500,15 +500,73 @@ new #[Title('Agentic Chat')] class extends Component
         <flux:separator variant="subtle" class="mb-4" />
 
         <div class="flex flex-col grow">
-            {{-- Context window --}}
+
+            {{-- Working directory --}}
+            <flux:card class="mx-2">
+                <div class="flex justify-between items-center gap-2 mb-2">
+                    <flux:subheading>Working Directory</flux:subheading>
+
+                    <div class="flex items-center gap-2 mt-2 mb-4">
+                        <flux:icon.folder-open class="size-4 text-zinc-600 dark:text-zinc-300" />
+                        <span class="text-sm text-zinc-700 dark:text-zinc-300">/user/home/...</span>
+                    </div>
+                </div>
+
+                {{-- <flux:text>
+                    /user/home/...
+                </flux:text>
+
+                <flux:button 
+                    size="sm" 
+                    variant="outline" 
+                    label="Change Directory" 
+                    icon="folder-open" 
+                    x-on:click="$wire.sendToast('Change directory functionality not implemented yet.', '', 'danger')"
+                /> --}}
+
+                <div class="flex justify-between items-start gap-2 mt-2 mb-4">
+                    <div class="w-2/3">
+                        <flux:subheading size="lg">Security:</flux:subheading>
+                        <ul>
+                            <li>Composer (audit [Fix]) ([update])</li>
+                            <li>npm (audit [Fix]) ([update])</li>
+                        </ul>
+
+                        <flux:subheading size="lg" class="mt-4">Git:</flux:subheading>
+                        <div class="flex items-center gap-2 mb-2">
+                            <flux:button size="sm" icon="arrow-down">Pull</flux:button>
+                            <flux:button size="sm" icon="arrow-right">Commit</flux:button> {{-- suggested conventional commits in modal? on modal confirmation, git add . && git commit -m "(suggested commit message)" --}}
+                            <flux:button size="sm" icon="arrow-up">Push</flux:button>
+                        </div>
+                        <div>
+                            (List most recent 2 branches worked on)
+                            <br />- [switch] <u><strong>main</strong></u> {{-- underline the current branch, make bold too? --}}
+                            <br />- [switch] feature/some-feature
+                        </div>
+                    </div>
+
+                    <div class="w-1/3">
+                        <flux:subheading size="lg">Laravel Details:</flux:subheading>
+                        <ul>
+                            <li>Laravel v13.x.x</li>
+                            <li>Livewire v4.x.x</li>
+                            <li>Flux Pro v2.x.x</li>
+                            <li>Project size: ? MB</li>
+                        </ul>
+                    </div>
+                </div>
+            </flux:card>
+
+            <flux:spacer />
+
+            {{-- Context window + actions --}}
             <flux:card class="mx-2">
                 <flux:subheading>Context Window</flux:subheading>
 
-                Context: x / y (z%)
-            </flux:card>
+                <flux:text>
+                    Context: x / y (z%)
+                </flux:text>
 
-            {{-- Chat/context actions --}}
-            <flux:card class="mx-2 mt-4">
                 <flux:subheading>Context Actions</flux:subheading>
 
                 <flux:button 
@@ -519,6 +577,7 @@ new #[Title('Agentic Chat')] class extends Component
                     x-on:click="$wire.sendToast('Condense context functionality not implemented yet.', '', 'danger')"
                 />
             </flux:card>
+
 
             <flux:spacer />
 
