@@ -553,6 +553,15 @@ new #[Title('Agentic Chat')] class extends Component
                             <li>Flux Pro v2.x.x</li>
                             <li>Project size: ? MB</li>
                         </ul>
+
+                        <div class="mt-4">
+                            <flux:subheading size="lg">Tests:</flux:subheading>
+                            <ul>
+                                <li>x/y passing (last attempt)</li>
+                            </ul>
+
+                            <flux:button>Run tests</flux:button>
+                        </div>
                     </div>
                 </div>
             </flux:card>
