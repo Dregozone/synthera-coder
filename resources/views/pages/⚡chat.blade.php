@@ -9,6 +9,7 @@ use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Attributes\Url;
 use Livewire\Component;
+use Symfony\Component\Process\Process;
 
 new #[Title('Agentic Chat')] class extends Component
 {
@@ -42,6 +43,12 @@ new #[Title('Agentic Chat')] class extends Component
     public array $tasks = [];
 
     public array $taskStatuses = [];
+
+    public string $tempSelectedProject = '';
+
+    public string $selectedProject = '';
+
+    public array $availableProjects = [];
     
     #[Computed]
     public function messages(): Collection
@@ -98,13 +105,25 @@ new #[Title('Agentic Chat')] class extends Component
         $this->defaultChatType = config('synthera-coder.default_chat_type', '');
         $this->currentChatType = $this->defaultChatType;
 
+        // Find the sibling projects
+        $this->availableProjects = collect(glob(base_path() . '/../*', GLOB_ONLYDIR))
+            ->sortBy(fn($path) => strtolower(basename($path)))
+            ->map(function ($path) {
+                return [
+                    'name' => basename($path),
+                    'id' => str_replace('synthera-coder/../', '', $path),
+                ];
+            })
+            ->pluck('id', 'name')
+            ->toArray();
+
         $this->loadSessionData();
     }
 
     private function loadSessionData(): void
     {
         $session = ChatSession::query()
-            ->select(['id', 'title', 'number_of_messages', 'current_model', 'current_chat_type'])
+            ->select(['id', 'title', 'number_of_messages', 'current_model', 'current_chat_type', 'current_working_directory'])
             ->find($this->sessionId);
 
         if ($session) {
@@ -112,6 +131,9 @@ new #[Title('Agentic Chat')] class extends Component
             $this->currentChatType = $session->current_chat_type ?: $this->defaultChatType;
             $this->sessionTitle = $session->title ?? '';
             $this->numberOfMessages = $session->number_of_messages ?? 0;
+            $this->selectedProject = $session->current_working_directory ?? '';
+
+            $this->tempSelectedProject = $this->selectedProject; // For the modal form
         }
     }
 
@@ -289,6 +311,58 @@ new #[Title('Agentic Chat')] class extends Component
             );
         }
     }
+
+    public function changeWorkingDirectory(): void
+    {
+        $this->selectedProject = $this->tempSelectedProject;
+
+        // Update the DB
+        ChatSession::query()
+            ->whereKey($this->sessionId)
+            ->update([
+                'current_working_directory' => $this->selectedProject,
+            ]);
+
+        $this->addMessage(
+            type: 'info',
+            by: 'user',
+            content: 'Changed working directory to: ' . $this->selectedProject
+        );
+
+        $this->dispatch('scroll-to-bottom');
+    }
+
+    public function runCommand(string $command): void
+    {
+        if (! is_dir($this->selectedProject)) {
+            $this->sendToast('Invalid project directory: ' . $this->selectedProject, '', 'danger');
+
+            return;
+        }
+
+        $commandArr = explode(' ', $command);
+
+        // This is a placeholder for running terminal commands from the UI, such as security audits or git commands.
+        $process = new Process(
+            $commandArr,
+            $this->selectedProject,
+        );
+        $process->setTimeout(180);
+        $process->run();
+
+        $successMsg = trim($process->getOutput());
+        $errorMsg = trim($process->getErrorOutput());
+
+        // $passed = !(strlen($errorMsg) > 0);
+
+        $this->addMessage(
+            type: 'info',
+            by: 'user',
+            content: "Executed command: $command. Result: $successMsg $errorMsg"
+        );
+
+        $this->dispatch('scroll-to-bottom');
+    }
 };
 ?>
 
@@ -329,6 +403,14 @@ new #[Title('Agentic Chat')] class extends Component
 
             // Only then fetch the assistant response
             {{-- await $wire.findAssistantResponse(); --}}
+        },
+
+        async runCommand(command) {
+            await $wire.sendToast('Running command: ' + command, '', 'info');
+
+            await $wire.runCommand(command);
+
+            await $wire.sendToast('Finished running command: ' + command, '', 'success');
         }
     }"
     id="container" 
@@ -500,15 +582,44 @@ new #[Title('Agentic Chat')] class extends Component
         <flux:separator variant="subtle" class="mb-4" />
 
         <div class="flex flex-col grow">
-
             {{-- Working directory --}}
             <flux:card class="mx-2">
                 <div class="flex justify-between items-center gap-2 mb-2">
                     <flux:subheading>Working Directory</flux:subheading>
 
                     <div class="flex items-center gap-2 mt-2 mb-4">
-                        <flux:icon.folder-open class="size-4 text-zinc-600 dark:text-zinc-300" />
-                        <span class="text-sm text-zinc-700 dark:text-zinc-300">/user/home/...</span>
+                        <flux:modal.trigger name="change-directory">
+                            <flux:icon.folder-open class="size-4 text-zinc-600 dark:text-zinc-300" />
+
+                            <span class="text-sm text-zinc-700 dark:text-zinc-300">{{ $selectedProject }}</span>
+                        </flux:modal.trigger>
+
+                        <flux:modal name="change-directory" class="md:w-96">
+                            <div class="space-y-6">
+                                <div>
+                                    <flux:heading size="lg">Change Directory</flux:heading>
+                                    <flux:text class="mt-2">Select a project to work on.</flux:text>
+                                </div>
+
+                                <flux:select wire:model="tempSelectedProject" label="Select a project" placeholder="Select a project">
+                                    @foreach ($availableProjects as $project => $path)
+                                        <flux:select.option :value="$path">{{ $project }}</flux:select.option>
+                                    @endforeach
+                                </flux:select>
+
+                                <div class="flex">
+                                    <flux:spacer />
+
+                                    <flux:button 
+                                        type="submit" 
+                                        variant="primary" 
+                                        wire:click="changeWorkingDirectory()"
+                                        x-on:click="$flux.modal('change-directory').close()"    
+                                    >Switch project</flux:button>
+                                </div>
+                            </div>
+                        </flux:modal>
+
                     </div>
                 </div>
 
@@ -527,16 +638,68 @@ new #[Title('Agentic Chat')] class extends Component
                 <div class="flex justify-between items-start gap-2 mt-2 mb-4">
                     <div class="w-2/3">
                         <flux:subheading size="lg">Security:</flux:subheading>
-                        <ul>
-                            <li>Composer (audit [Fix]) ([update])</li>
-                            <li>npm (audit [Fix]) ([update])</li>
-                        </ul>
+
+                        <div class="flex items-center gap-2 mb-2">
+                            <flux:subheading>Composer:</flux:subheading>
+                            
+                            <flux:button 
+                                size="sm" 
+                                variant="outline" 
+                                label="Run security audits" 
+                                icon="shield-check" 
+                                x-on:click="runCommand('composer audit')"
+                            >Audit</flux:button>
+                            
+                            <flux:button 
+                                size="sm" 
+                                variant="outline" 
+                                label="Run security audits" 
+                                icon="wrench"
+                                x-on:click="runCommand('composer audit fix')"
+                            >Fix</flux:button>
+
+                            <flux:button 
+                                size="sm" 
+                                variant="outline" 
+                                label="Run security audits" 
+                                icon="chevron-double-up"
+                                x-on:click="runCommand('composer update')"
+                            >Update</flux:button>
+                        </div>
+
+                        <div class="flex items-center gap-2 mb-2">
+                            <flux:subheading>npm:</flux:subheading>
+                            
+                            <flux:button 
+                                size="sm" 
+                                variant="outline" 
+                                label="Run security audits" 
+                                icon="shield-check" 
+                                x-on:click="runCommand('npm audit')"
+                            >Audit</flux:button>
+                            
+                            <flux:button 
+                                size="sm" 
+                                variant="outline" 
+                                label="Run security audits" 
+                                icon="wrench"
+                                x-on:click="runCommand('npm audit fix')"
+                            >Fix</flux:button>
+
+                            <flux:button 
+                                size="sm" 
+                                variant="outline" 
+                                label="Run security audits" 
+                                icon="chevron-double-up"
+                                x-on:click="runCommand('npm update')"
+                            >Update</flux:button>
+                        </div>
 
                         <flux:subheading size="lg" class="mt-4">Git:</flux:subheading>
                         <div class="flex items-center gap-2 mb-2">
-                            <flux:button size="sm" icon="arrow-down">Pull</flux:button>
+                            <flux:button size="sm" icon="arrow-down" x-on:click="runCommand('git pull')">Pull</flux:button>
                             <flux:button size="sm" icon="arrow-right">Commit</flux:button> {{-- suggested conventional commits in modal? on modal confirmation, git add . && git commit -m "(suggested commit message)" --}}
-                            <flux:button size="sm" icon="arrow-up">Push</flux:button>
+                            <flux:button size="sm" icon="arrow-up" x-on:click="runCommand('git push')">Push</flux:button>
                         </div>
                         <div>
                             (List most recent 2 branches worked on)
