@@ -3,6 +3,7 @@
 use App\Models\ChatMessage;
 use App\Models\ChatSession;
 use App\Services\ChatService;
+use App\Services\ToolService;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Lottery;
 use Livewire\Attributes\Computed;
@@ -41,6 +42,8 @@ new #[Title('Agentic Chat')] class extends Component
     public string $prompt = '';
 
     public array $tasks = [];
+
+    public array $taskResults = [];
 
     public array $taskStatuses = [];
 
@@ -249,7 +252,7 @@ new #[Title('Agentic Chat')] class extends Component
     {
         $this->syncSessionConfiguration();
 
-        $chatService->workOnTask(
+        $taskResults = $chatService->workOnTask(
             sessionId: $this->sessionId,
             type: $this->currentChatType,
             model: $this->currentModel,
@@ -260,6 +263,7 @@ new #[Title('Agentic Chat')] class extends Component
 
         $this->loadSessionData();
 
+        $this->taskResults[$taskNum] = $taskResults;
         $this->taskStatuses[$taskNum] = 'Done';
 
         $this->dispatch('scroll-to-bottom');
@@ -281,6 +285,10 @@ new #[Title('Agentic Chat')] class extends Component
     public function assignSessionTitle(ChatService $chatService): void
     {
         $this->syncSessionConfiguration();
+
+        if ($this->sessionTitle !== null && $this->sessionTitle !== '') {
+            return; // Dont update an already populated title
+        }
 
         $title = $chatService->assignSessionTitle(
             sessionId: $this->sessionId,
@@ -328,6 +336,24 @@ new #[Title('Agentic Chat')] class extends Component
             by: 'user',
             content: 'Changed working directory to: ' . $this->selectedProject
         );
+
+        $this->dispatch('scroll-to-bottom');
+    }
+
+    public function runToolsForTask(ToolService $toolService, int $taskNum): void
+    {
+        $this->syncSessionConfiguration();
+
+        $toolService->runToolsForTask(
+            sessionId: $this->sessionId,
+            type: $this->currentChatType,
+            model: $this->currentModel,
+            message: $this->originalPrompt,
+            tasks: $this->tasks,
+            task: $taskNum,
+        );
+
+        $this->loadSessionData();
 
         $this->dispatch('scroll-to-bottom');
     }
@@ -393,16 +419,24 @@ new #[Title('Agentic Chat')] class extends Component
             // Based on the task list and the original message, generate and apply a ChatSession title
             await $wire.assignSessionTitle();
 
+            // Skip if 'Reframe your question'
+            if ($wire.tasks[0] && $wire.tasks[0].toLowerCase().includes('reframe your question')) {
+                return;
+            }
+
             for (let i = 0; i < $wire.tasks.length; i++) {
                 let taskNumber = i + 1;
 
                 await $wire.startOnTask(taskNumber);
 
+                // Per task find the required tools to solve the task and run them to get the necessary information to complete the task
+                await $wire.runToolsForTask(taskNumber);
+
                 await $wire.workOnTask(taskNumber);
             }
 
             // Only then fetch the assistant response
-            {{-- await $wire.findAssistantResponse(); --}}
+            await $wire.findAssistantResponse();
         },
 
         async runCommand(command) {

@@ -103,20 +103,20 @@ class ChatService
         string $message,
         array $tasks,
         int $task
-    ): void {
+    ): string {
         set_time_limit(300);
 
         // Adjust task index since the UI is 1 indexed but arrays are 0 indexed
         $taskIndex = $task - 1;
 
         if (! isset($tasks[$taskIndex])) {
-            return;
+            return '';
         }
 
         $agent = $this->findAgent($model, $sessionId);
 
         if ($agent == '') {
-            return;
+            return '';
         }
 
         // Process the users message
@@ -133,13 +133,25 @@ class ChatService
         $response = $agent
             ->prompt($instructions);
 
+        // Find a short summary of what this task has achieved
+        $summaryInstructions = '
+            Based on the results from working on the task, generate a concise summary of what has been achieved for this task. 
+            The summary should be no more than 5 words. 
+            Task results:
+        ';
+
+        $summaryResponse = $agent
+            ->prompt($summaryInstructions.$response->text);
+
         // Log the response from the agent after working on the task
         $this->addMessage(
             sessionId: $sessionId,
             type: $type,
             by: 'assistant',
-            content: "### Worked on task #{$task}\n\n{$response->text}",
+            content: "### Worked on task #{$task}\n\n{$summaryResponse->text}",
         );
+
+        return $response->text; // This is the full results, not the summary
     }
 
     public function assignSessionTitle(
@@ -178,29 +190,33 @@ class ChatService
         string $model,
         string $message,
         string $originalPrompt,
-    ): void {
+    ): string {
         set_time_limit(300);
 
         $agent = $this->findAgent($model, $sessionId);
 
         if ($agent == '') {
-            return;
+            return '';
         }
+
+        $instructions = '
+            Based on the results from processing each of the individual tasks, and the original user message, generate a final response to the user.
+            Ensure this is a valuable and accurate response that effectively addresses the users original message in a coherent and comprehensive manner.
+            Original message: 
+        ';
 
         // Process the users message
         $response = $agent
-            ->prompt($originalPrompt);
+            ->prompt($instructions.$originalPrompt);
 
         $this->addMessage(
             sessionId: $sessionId,
             type: $type,
             by: 'assistant',
-            content: $response,
+            content: $response->text,
         );
 
-        // dd(
-        //     "ChatService->sendMessage called with type: $type, model: $model, message: $message",
-        // );
+        return $response->text;
     }
 
     public function addMessage(
@@ -234,7 +250,7 @@ class ChatService
             ->toArray();
     }
 
-    private function findAgent(string $model, int $sessionId): Qwen3_8b_8k|string
+    public function findAgent(string $model, int $sessionId): Qwen3_8b_8k|string
     {
         if ($model === 'qwen3:8b-8k') {
             return new Qwen3_8b_8k;
