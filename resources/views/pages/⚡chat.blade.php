@@ -9,6 +9,7 @@ use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Attributes\Url;
 use Livewire\Component;
+use Symfony\Component\Process\Process;
 
 new #[Title('Agentic Chat')] class extends Component
 {
@@ -330,6 +331,38 @@ new #[Title('Agentic Chat')] class extends Component
 
         $this->dispatch('scroll-to-bottom');
     }
+
+    public function runCommand(string $command): void
+    {
+        if (! is_dir($this->selectedProject)) {
+            $this->sendToast('Invalid project directory: ' . $this->selectedProject, '', 'danger');
+
+            return;
+        }
+
+        $commandArr = explode(' ', $command);
+
+        // This is a placeholder for running terminal commands from the UI, such as security audits or git commands.
+        $process = new Process(
+            $commandArr,
+            $this->selectedProject,
+        );
+        $process->setTimeout(180);
+        $process->run();
+
+        $successMsg = trim($process->getOutput());
+        $errorMsg = trim($process->getErrorOutput());
+
+        // $passed = !(strlen($errorMsg) > 0);
+
+        $this->addMessage(
+            type: 'info',
+            by: 'user',
+            content: "Executed command: $command. Result: $successMsg $errorMsg"
+        );
+
+        $this->dispatch('scroll-to-bottom');
+    }
 };
 ?>
 
@@ -370,6 +403,14 @@ new #[Title('Agentic Chat')] class extends Component
 
             // Only then fetch the assistant response
             {{-- await $wire.findAssistantResponse(); --}}
+        },
+
+        async runCommand(command) {
+            await $wire.sendToast('Running command: ' + command, '', 'info');
+
+            await $wire.runCommand(command);
+
+            await $wire.sendToast('Finished running command: ' + command, '', 'success');
         }
     }"
     id="container" 
@@ -597,16 +638,68 @@ new #[Title('Agentic Chat')] class extends Component
                 <div class="flex justify-between items-start gap-2 mt-2 mb-4">
                     <div class="w-2/3">
                         <flux:subheading size="lg">Security:</flux:subheading>
-                        <ul>
-                            <li>Composer (audit [Fix]) ([update])</li>
-                            <li>npm (audit [Fix]) ([update])</li>
-                        </ul>
+
+                        <div class="flex items-center gap-2 mb-2">
+                            <flux:subheading>Composer:</flux:subheading>
+                            
+                            <flux:button 
+                                size="sm" 
+                                variant="outline" 
+                                label="Run security audits" 
+                                icon="shield-check" 
+                                x-on:click="runCommand('composer audit')"
+                            >Audit</flux:button>
+                            
+                            <flux:button 
+                                size="sm" 
+                                variant="outline" 
+                                label="Run security audits" 
+                                icon="wrench"
+                                x-on:click="runCommand('composer audit fix')"
+                            >Fix</flux:button>
+
+                            <flux:button 
+                                size="sm" 
+                                variant="outline" 
+                                label="Run security audits" 
+                                icon="chevron-double-up"
+                                x-on:click="runCommand('composer update')"
+                            >Update</flux:button>
+                        </div>
+
+                        <div class="flex items-center gap-2 mb-2">
+                            <flux:subheading>npm:</flux:subheading>
+                            
+                            <flux:button 
+                                size="sm" 
+                                variant="outline" 
+                                label="Run security audits" 
+                                icon="shield-check" 
+                                x-on:click="runCommand('npm audit')"
+                            >Audit</flux:button>
+                            
+                            <flux:button 
+                                size="sm" 
+                                variant="outline" 
+                                label="Run security audits" 
+                                icon="wrench"
+                                x-on:click="runCommand('npm audit fix')"
+                            >Fix</flux:button>
+
+                            <flux:button 
+                                size="sm" 
+                                variant="outline" 
+                                label="Run security audits" 
+                                icon="chevron-double-up"
+                                x-on:click="runCommand('npm update')"
+                            >Update</flux:button>
+                        </div>
 
                         <flux:subheading size="lg" class="mt-4">Git:</flux:subheading>
                         <div class="flex items-center gap-2 mb-2">
-                            <flux:button size="sm" icon="arrow-down">Pull</flux:button>
+                            <flux:button size="sm" icon="arrow-down" x-on:click="runCommand('git pull')">Pull</flux:button>
                             <flux:button size="sm" icon="arrow-right">Commit</flux:button> {{-- suggested conventional commits in modal? on modal confirmation, git add . && git commit -m "(suggested commit message)" --}}
-                            <flux:button size="sm" icon="arrow-up">Push</flux:button>
+                            <flux:button size="sm" icon="arrow-up" x-on:click="runCommand('git push')">Push</flux:button>
                         </div>
                         <div>
                             (List most recent 2 branches worked on)
