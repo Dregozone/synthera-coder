@@ -49,6 +49,15 @@ test('older messages can be loaded on demand', function (): void {
         ->assertSeeText('Message token 001');
 });
 
+test('working directory switch button closes the modal via flux alpine helper', function (): void {
+    $session = ChatSession::create();
+
+    $response = get(route('home', ['sessionId' => $session->id]));
+
+    $response->assertOk();
+    $response->assertSee('$flux.modal(\'change-directory\').close()', escape: false);
+});
+
 test('adding a message increments the cached session counters', function (): void {
     $session = ChatSession::create();
     $originalUpdatedAt = $session->updated_at->copy();

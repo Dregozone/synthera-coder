@@ -131,6 +131,8 @@ new #[Title('Agentic Chat')] class extends Component
             $this->sessionTitle = $session->title ?? '';
             $this->numberOfMessages = $session->number_of_messages ?? 0;
             $this->selectedProject = $session->current_working_directory ?? '';
+
+            $this->tempSelectedProject = $this->selectedProject; // For the modal form
         }
     }
 
@@ -312,11 +314,6 @@ new #[Title('Agentic Chat')] class extends Component
     public function changeWorkingDirectory(): void
     {
         $this->selectedProject = $this->tempSelectedProject;
-
-        dd(
-            $this->selectedProject,
-            $this->tempSelectedProject
-        );
 
         // Update the DB
         ChatSession::query()
@@ -576,7 +573,7 @@ new #[Title('Agentic Chat')] class extends Component
                                         type="submit" 
                                         variant="primary" 
                                         wire:click="changeWorkingDirectory()"
-                                        x-on:click="$dispatch('close')"    
+                                        x-on:click="$flux.modal('change-directory').close()"    
                                     >Switch project</flux:button>
                                 </div>
                             </div>
