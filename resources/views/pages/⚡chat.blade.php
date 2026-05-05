@@ -42,6 +42,12 @@ new #[Title('Agentic Chat')] class extends Component
     public array $tasks = [];
 
     public array $taskStatuses = [];
+
+    public string $tempSelectedProject = '';
+
+    public string $selectedProject = '';
+
+    public array $availableProjects = [];
     
     #[Computed]
     public function messages(): Collection
@@ -97,6 +103,18 @@ new #[Title('Agentic Chat')] class extends Component
         $this->availableChatTypes = config('synthera-coder.chat_types', []);
         $this->defaultChatType = config('synthera-coder.default_chat_type', '');
         $this->currentChatType = $this->defaultChatType;
+
+        // Find the sibling projects
+        $this->availableProjects = collect(glob(base_path() . '/../*', GLOB_ONLYDIR))
+            ->sortBy(fn($path) => strtolower(basename($path)))
+            ->map(function ($path) {
+                return [
+                    'name' => basename($path),
+                    'id' => str_replace('synthera-coder/../', '', $path),
+                ];
+            })
+            ->pluck('id', 'name')
+            ->toArray();
 
         $this->loadSessionData();
     }
@@ -288,6 +306,19 @@ new #[Title('Agentic Chat')] class extends Component
                 variant: $type,
             );
         }
+    }
+
+    public function changeWorkingDirectory(): void
+    {
+        $this->selectedProject = $this->tempSelectedProject;
+
+        $this->addMessage(
+            type: 'info',
+            by: 'user',
+            content: 'Changed working directory to: ' . $this->selectedProject
+        );
+
+        $this->dispatch('scroll-to-bottom');
     }
 };
 ?>
@@ -500,15 +531,44 @@ new #[Title('Agentic Chat')] class extends Component
         <flux:separator variant="subtle" class="mb-4" />
 
         <div class="flex flex-col grow">
-
             {{-- Working directory --}}
             <flux:card class="mx-2">
                 <div class="flex justify-between items-center gap-2 mb-2">
                     <flux:subheading>Working Directory</flux:subheading>
 
                     <div class="flex items-center gap-2 mt-2 mb-4">
-                        <flux:icon.folder-open class="size-4 text-zinc-600 dark:text-zinc-300" />
-                        <span class="text-sm text-zinc-700 dark:text-zinc-300">/user/home/...</span>
+                        <flux:modal.trigger name="change-directory">
+                            <flux:icon.folder-open class="size-4 text-zinc-600 dark:text-zinc-300" />
+
+                            <span class="text-sm text-zinc-700 dark:text-zinc-300">{{ $selectedProject }}</span>
+                        </flux:modal.trigger>
+
+                        <flux:modal name="change-directory" class="md:w-96">
+                            <div class="space-y-6">
+                                <div>
+                                    <flux:heading size="lg">Change Directory</flux:heading>
+                                    <flux:text class="mt-2">Select a project to work on.</flux:text>
+                                </div>
+
+                                <flux:select wire:model="tempSelectedProject" label="Select a project" placeholder="Select a project">
+                                    @foreach ($availableProjects as $project => $path)
+                                        <flux:select.option :value="$path">{{ $project }}</flux:select.option>
+                                    @endforeach
+                                </flux:select>
+
+                                <div class="flex">
+                                    <flux:spacer />
+
+                                    <flux:button 
+                                        type="submit" 
+                                        variant="primary" 
+                                        wire:click="changeWorkingDirectory()"
+                                        x-on:click="$dispatch('close')"    
+                                    >Switch project</flux:button>
+                                </div>
+                            </div>
+                        </flux:modal>
+
                     </div>
                 </div>
 
