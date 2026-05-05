@@ -15,6 +15,8 @@ class ChatSession extends Model
         // Pull the current setup so we can pick up where we left off between sessions
         'current_model',
         'current_chat_type',
+
+        'current_working_directory',
     ];
 
     public function messages(): HasMany

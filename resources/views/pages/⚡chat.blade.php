@@ -122,7 +122,7 @@ new #[Title('Agentic Chat')] class extends Component
     private function loadSessionData(): void
     {
         $session = ChatSession::query()
-            ->select(['id', 'title', 'number_of_messages', 'current_model', 'current_chat_type'])
+            ->select(['id', 'title', 'number_of_messages', 'current_model', 'current_chat_type', 'current_working_directory'])
             ->find($this->sessionId);
 
         if ($session) {
@@ -130,6 +130,7 @@ new #[Title('Agentic Chat')] class extends Component
             $this->currentChatType = $session->current_chat_type ?: $this->defaultChatType;
             $this->sessionTitle = $session->title ?? '';
             $this->numberOfMessages = $session->number_of_messages ?? 0;
+            $this->selectedProject = $session->current_working_directory ?? '';
         }
     }
 
@@ -311,6 +312,18 @@ new #[Title('Agentic Chat')] class extends Component
     public function changeWorkingDirectory(): void
     {
         $this->selectedProject = $this->tempSelectedProject;
+
+        dd(
+            $this->selectedProject,
+            $this->tempSelectedProject
+        );
+
+        // Update the DB
+        ChatSession::query()
+            ->whereKey($this->sessionId)
+            ->update([
+                'current_working_directory' => $this->selectedProject,
+            ]);
 
         $this->addMessage(
             type: 'info',
