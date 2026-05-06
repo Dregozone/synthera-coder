@@ -3,6 +3,7 @@
 use App\Models\ChatMessage;
 use App\Models\ChatSession;
 use App\Services\ChatService;
+use App\Services\ContextService;
 use App\Services\ToolService;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Lottery;
@@ -18,6 +19,8 @@ new #[Title('Agentic Chat')] class extends Component
 
     #[Url]
     public int $sessionId = 0;
+
+    public array $context = [];
 
     public int $visibleMessageCount = self::MESSAGE_BATCH_SIZE;
 
@@ -54,6 +57,10 @@ new #[Title('Agentic Chat')] class extends Component
     public array $availableProjects = [];
 
     public array $toolResults = [];
+
+    public int $contextSizeBytes = 0;
+
+    public int $maxContextSizeBytes = 10;
     
     #[Computed]
     public function messages(): Collection
@@ -93,6 +100,8 @@ new #[Title('Agentic Chat')] class extends Component
 
             return;
         }
+
+        $this->maxContextSizeBytes = ContextService::MAX_CONTEXT_SIZE_BYTES;
 
         // First time the page loads actions
         // 1 in 10 full page loads (Not livewire re-renders) will perform these maintenance tasks
@@ -139,6 +148,11 @@ new #[Title('Agentic Chat')] class extends Component
             $this->selectedProject = $session->current_working_directory ?? '';
 
             $this->tempSelectedProject = $this->selectedProject; // For the modal form
+
+            // Update the context
+            $contextService = new ContextService($this->sessionId);
+            $this->context = $contextService->getContext();
+            $this->contextSizeBytes = $contextService->getContextSizeBytes();
         }
     }
 
@@ -205,6 +219,9 @@ new #[Title('Agentic Chat')] class extends Component
             message: $this->originalPrompt,
         );
 
+        $contextService = new ContextService($this->sessionId);
+        $contextService->upsertInContext('originalMessage', $this->originalPrompt);
+
         $this->loadSessionData();
 
         $this->dispatch('scroll-to-bottom');
@@ -223,6 +240,9 @@ new #[Title('Agentic Chat')] class extends Component
 
         $this->tasks = $tasks;
 
+        $contextService = new ContextService($this->sessionId);
+        $contextService->upsertInContext('tasks', $tasks);
+
         $this->taskStatuses = [];
         foreach ($tasks as $index => $task) {
             $this->taskStatuses[$index + 1] = 'Pending';
@@ -237,7 +257,7 @@ new #[Title('Agentic Chat')] class extends Component
     {
         $this->syncSessionConfiguration();
 
-        $chatService->findAssistantResponse(
+        $response = $chatService->findAssistantResponse(
             sessionId: $this->sessionId,
             type: $this->currentChatType,
             model: $this->currentModel,
@@ -245,6 +265,9 @@ new #[Title('Agentic Chat')] class extends Component
             originalPrompt: $this->originalPrompt,
             taskResults: $this->toolResults,
         );
+
+        $contextService = new ContextService($this->sessionId);
+        $contextService->addToContext('messages', $response);
 
         $this->loadSessionData();
 
@@ -266,6 +289,9 @@ new #[Title('Agentic Chat')] class extends Component
 
         $this->toolResults[$taskNum] = $toolResults;
 
+        $contextService = new ContextService($this->sessionId);
+        $contextService->addToContext('toolResults', $toolResults);
+
         $this->loadSessionData();
 
         $this->dispatch('scroll-to-bottom');
@@ -274,13 +300,6 @@ new #[Title('Agentic Chat')] class extends Component
     public function workOnTask(ChatService $chatService, int $taskNum): void
     {
         $this->syncSessionConfiguration();
-
-        // dd(
-        //     "about to workOnTask",
-        //     $taskNum,
-        //     $this->toolResults,
-        //     $this->toolResults[$taskNum] ?? null,
-        // );
 
         $taskResults = $chatService->workOnTask(
             sessionId: $this->sessionId,
@@ -297,6 +316,9 @@ new #[Title('Agentic Chat')] class extends Component
 
         $this->taskResults[$taskNum] = $taskResults;
         $this->taskStatuses[$taskNum] = 'Done';
+
+        $contextService = new ContextService($this->sessionId);
+        $contextService->addToContext('taskResults', $this->taskResults);
 
         $this->dispatch('scroll-to-bottom');
     }
@@ -402,6 +424,38 @@ new #[Title('Agentic Chat')] class extends Component
         );
 
         $this->dispatch('scroll-to-bottom');
+    }
+
+    public function condenseContext()
+    {
+        $contextService = new ContextService($this->sessionId);
+        $contextService->condenseContext();
+
+        $this->addMessage(
+            type: 'info',
+            by: 'user',
+            content: "Context condensed."
+        );
+
+        $this->dispatch('scroll-to-bottom');
+
+        $this->loadSessionData(); // Reload the context to get the condensed version
+    }
+
+    public function clearContext()
+    {
+        $contextService = new ContextService($this->sessionId);
+        $contextService->clearContext();
+
+        $this->addMessage(
+            type: 'info',
+            by: 'user',
+            content: "Context cleared."
+        );
+
+        $this->dispatch('scroll-to-bottom');
+
+        $this->loadSessionData(); // Reload the context to reflect the cleared state
     }
 };
 ?>
@@ -671,18 +725,6 @@ new #[Title('Agentic Chat')] class extends Component
                     </div>
                 </div>
 
-                {{-- <flux:text>
-                    /user/home/...
-                </flux:text>
-
-                <flux:button 
-                    size="sm" 
-                    variant="outline" 
-                    label="Change Directory" 
-                    icon="folder-open" 
-                    x-on:click="$wire.sendToast('Change directory functionality not implemented yet.', '', 'danger')"
-                /> --}}
-
                 <div class="flex justify-between items-start gap-2 mt-2 mb-4">
                     <div class="w-2/3">
                         <flux:subheading size="lg">Security:</flux:subheading>
@@ -784,7 +826,10 @@ new #[Title('Agentic Chat')] class extends Component
                 <flux:subheading>Context Window</flux:subheading>
 
                 <flux:text>
-                    Context: x / y (z%)
+                    Context: 
+                    {{ number_format($contextSizeBytes) }}b / 
+                    {{ number_format($maxContextSizeBytes) }}b 
+                    ({{ ROUND(100 * $contextSizeBytes / $maxContextSizeBytes, 1) }}%)
                 </flux:text>
 
                 <flux:subheading>Context Actions</flux:subheading>
@@ -794,7 +839,15 @@ new #[Title('Agentic Chat')] class extends Component
                     variant="outline" 
                     label="Condense Context" 
                     icon="arrows-pointing-in" 
-                    x-on:click="$wire.sendToast('Condense context functionality not implemented yet.', '', 'danger')"
+                    wire:click="condenseContext()"
+                />
+
+                <flux:button 
+                    size="sm" 
+                    variant="outline" 
+                    label="Clear Context" 
+                    icon="trash" 
+                    wire:click="clearContext()"
                 />
             </flux:card>
 
