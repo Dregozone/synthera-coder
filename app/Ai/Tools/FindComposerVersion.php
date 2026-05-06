@@ -25,8 +25,8 @@ class FindComposerVersion implements Tool
      */
     public function handle(Request $request): Stringable|string
     {
-        $fileService = new FileService();
-        
+        $fileService = new FileService;
+
         $filePath = $fileService->resolveFilePath(
             filePath: 'composer.lock',
             currentWorkingDirectory: ChatSession::query()->latest('updated_at')->value('current_working_directory'),
@@ -45,7 +45,7 @@ class FindComposerVersion implements Tool
         $contentsArr = json_decode($contents, true);
 
         if (! isset($contentsArr['packages']) || ! is_array($contentsArr['packages'])) {
-            return "No packages found in composer.lock";
+            return 'No packages found in composer.lock';
         }
 
         $versionNumber = collect($contentsArr['packages'])

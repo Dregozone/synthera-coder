@@ -25,7 +25,7 @@ class ReadFile implements Tool
      */
     public function handle(Request $request): Stringable|string
     {
-        $fileService = new FileService();
+        $fileService = new FileService;
 
         $filePath = $fileService->resolveFilePath(
             filePath: (string) $request['value'],

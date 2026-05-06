@@ -107,7 +107,7 @@ class ChatService
             array_map(trim(...), explode('|', $refinedResponse->text)),
             static fn (string $task): bool => $task !== '',
         ));
-            
+
         // Log the tasks that have been derived from the users message
         $this->addMessage(
             sessionId: $sessionId,

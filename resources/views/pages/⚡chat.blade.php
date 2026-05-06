@@ -3,6 +3,7 @@
 use App\Models\ChatMessage;
 use App\Models\ChatSession;
 use App\Services\ChatService;
+use App\Services\ContextService;
 use App\Services\ToolService;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Lottery;
@@ -18,6 +19,8 @@ new #[Title('Agentic Chat')] class extends Component
 
     #[Url]
     public int $sessionId = 0;
+
+    public array $context = [];
 
     public int $visibleMessageCount = self::MESSAGE_BATCH_SIZE;
 
@@ -54,6 +57,10 @@ new #[Title('Agentic Chat')] class extends Component
     public array $availableProjects = [];
 
     public array $toolResults = [];
+
+    public int $contextSizeBytes = 0;
+
+    public int $maxContextSizeBytes = 10;
     
     #[Computed]
     public function messages(): Collection
@@ -94,6 +101,8 @@ new #[Title('Agentic Chat')] class extends Component
             return;
         }
 
+        $this->maxContextSizeBytes = ContextService::MAX_CONTEXT_SIZE_BYTES;
+
         // First time the page loads actions
         // 1 in 10 full page loads (Not livewire re-renders) will perform these maintenance tasks
         Lottery::odds(1, 10)
@@ -113,12 +122,10 @@ new #[Title('Agentic Chat')] class extends Component
         // Find the sibling projects
         $this->availableProjects = collect(glob(base_path() . '/../*', GLOB_ONLYDIR))
             ->sortBy(fn($path) => strtolower(basename($path)))
-            ->map(function ($path) {
-                return [
-                    'name' => basename($path),
-                    'id' => str_replace('synthera-coder/../', '', $path),
-                ];
-            })
+            ->map(fn($path) => [
+                'name' => basename((string) $path),
+                'id' => str_replace('synthera-coder/../', '', $path),
+            ])
             ->pluck('id', 'name')
             ->toArray();
 
@@ -139,6 +146,11 @@ new #[Title('Agentic Chat')] class extends Component
             $this->selectedProject = $session->current_working_directory ?? '';
 
             $this->tempSelectedProject = $this->selectedProject; // For the modal form
+
+            // Update the context
+            $contextService = new ContextService($this->sessionId);
+            $this->context = $contextService->getContext();
+            $this->contextSizeBytes = $contextService->getContextSizeBytes();
         }
     }
 
@@ -205,6 +217,9 @@ new #[Title('Agentic Chat')] class extends Component
             message: $this->originalPrompt,
         );
 
+        $contextService = new ContextService($this->sessionId);
+        $contextService->upsertInContext('originalMessage', $this->originalPrompt);
+
         $this->loadSessionData();
 
         $this->dispatch('scroll-to-bottom');
@@ -223,6 +238,9 @@ new #[Title('Agentic Chat')] class extends Component
 
         $this->tasks = $tasks;
 
+        $contextService = new ContextService($this->sessionId);
+        $contextService->upsertInContext('tasks', $tasks);
+
         $this->taskStatuses = [];
         foreach ($tasks as $index => $task) {
             $this->taskStatuses[$index + 1] = 'Pending';
@@ -237,7 +255,7 @@ new #[Title('Agentic Chat')] class extends Component
     {
         $this->syncSessionConfiguration();
 
-        $chatService->findAssistantResponse(
+        $response = $chatService->findAssistantResponse(
             sessionId: $this->sessionId,
             type: $this->currentChatType,
             model: $this->currentModel,
@@ -245,6 +263,9 @@ new #[Title('Agentic Chat')] class extends Component
             originalPrompt: $this->originalPrompt,
             taskResults: $this->toolResults,
         );
+
+        $contextService = new ContextService($this->sessionId);
+        $contextService->addToContext('messages', $response);
 
         $this->loadSessionData();
 
@@ -266,6 +287,9 @@ new #[Title('Agentic Chat')] class extends Component
 
         $this->toolResults[$taskNum] = $toolResults;
 
+        $contextService = new ContextService($this->sessionId);
+        $contextService->addToContext('toolResults', $toolResults);
+
         $this->loadSessionData();
 
         $this->dispatch('scroll-to-bottom');
@@ -274,13 +298,6 @@ new #[Title('Agentic Chat')] class extends Component
     public function workOnTask(ChatService $chatService, int $taskNum): void
     {
         $this->syncSessionConfiguration();
-
-        // dd(
-        //     "about to workOnTask",
-        //     $taskNum,
-        //     $this->toolResults,
-        //     $this->toolResults[$taskNum] ?? null,
-        // );
 
         $taskResults = $chatService->workOnTask(
             sessionId: $this->sessionId,
@@ -297,6 +314,9 @@ new #[Title('Agentic Chat')] class extends Component
 
         $this->taskResults[$taskNum] = $taskResults;
         $this->taskStatuses[$taskNum] = 'Done';
+
+        $contextService = new ContextService($this->sessionId);
+        $contextService->addToContext('taskResults', $this->taskResults);
 
         $this->dispatch('scroll-to-bottom');
     }
@@ -403,11 +423,65 @@ new #[Title('Agentic Chat')] class extends Component
 
         $this->dispatch('scroll-to-bottom');
     }
+
+    public function condenseContext()
+    {
+        $contextService = new ContextService($this->sessionId);
+        $contextService->condenseContext();
+
+        $this->addMessage(
+            type: 'info',
+            by: 'user',
+            content: "Context condensed."
+        );
+
+        $this->dispatch('scroll-to-bottom');
+
+        $this->loadSessionData(); // Reload the context to get the condensed version
+    }
+
+    public function clearContext()
+    {
+        $contextService = new ContextService($this->sessionId);
+        $contextService->clearContext();
+
+        $this->addMessage(
+            type: 'info',
+            by: 'user',
+            content: "Context cleared."
+        );
+
+        $this->dispatch('scroll-to-bottom');
+
+        $this->loadSessionData(); // Reload the context to reflect the cleared state
+    }
 };
 ?>
 
 <div
     x-data="{
+        thinking: false,
+
+        thinkingMessage: 'Thinking...',
+
+        defaultThinkingMessage: 'Thinking...',
+
+        thinkingStartedAt: null,
+
+        thinkingMessageTimer: null,
+
+        selectedThinkingStages: [],
+
+        thinkingStageBuckets: [
+            { afterSeconds: 0, texts: ['Warming up the gears...', 'Preparing the brainwaves...', 'Getting the engine started...'] },
+            { afterSeconds: 5, texts: ['Thinking...', 'Sizing things up...', 'Sketching the first pass...'] },
+            { afterSeconds: 10, texts: ['Thinking harder...', 'Turning over the tricky bits...', 'Working through the moving parts...'] },
+            { afterSeconds: 20, texts: ['Connecting the dots...', 'Following the breadcrumb trail...', 'Lining up the puzzle pieces...'] },
+            { afterSeconds: 30, texts: ['Digging through the details...', 'Inspecting the deeper layers...', 'Pressure-testing the assumptions...'] },
+            { afterSeconds: 45, texts: ['Running the deep pass...', 'Going full detective mode...', 'Sweeping for edge cases...'] },
+            { afterSeconds: 60, texts: ['Reasoning at full tilt...', 'Operating at maximum overthink...', 'Still cooking, but we are close...'] },
+        ],
+
         editTitle() {
             const newTitle = prompt('Enter a new title for this chat session:', '{{ $sessionTitle }}');
 
@@ -428,10 +502,14 @@ new #[Title('Agentic Chat')] class extends Component
             await $wire.sendMessage();
 
             // Based on the users message, derive a tasks list
+            this.startThinking();
             await $wire.updateTasks();
+            this.stopThinking();
 
             // Based on the task list and the original message, generate and apply a ChatSession title
+            this.startThinking();
             await $wire.assignSessionTitle();
+            this.stopThinking();
 
             // Abort here if 'Reframe your question'
             if ($wire.tasks[0] && $wire.tasks[0].toLowerCase().includes('reframe your question')) {
@@ -441,16 +519,24 @@ new #[Title('Agentic Chat')] class extends Component
             for (let i = 0; i < $wire.tasks.length; i++) {
                 let taskNumber = i + 1;
 
+                this.startThinking();
                 await $wire.startOnTask(taskNumber);
+                this.stopThinking();
 
                 // Per task find the required tools to solve the task and run them to get the necessary information to complete the task
+                this.startThinking();
                 await $wire.runToolsForTask(taskNumber);
+                this.stopThinking();
 
+                this.startThinking();
                 await $wire.workOnTask(taskNumber);
+                this.stopThinking();
             }
 
             // Only then fetch the assistant response
+            this.startThinking();
             await $wire.findAssistantResponse();
+            this.stopThinking();
         },
 
         async runCommand(command) {
@@ -459,6 +545,62 @@ new #[Title('Agentic Chat')] class extends Component
             await $wire.runCommand(command);
 
             await $wire.sendToast('Finished running command: ' + command, '', 'success');
+        },
+
+        pickThinkingStages() {
+            return this.thinkingStageBuckets.map((stage) => {
+                const randomIndex = Math.floor(Math.random() * stage.texts.length);
+
+                return {
+                    afterSeconds: stage.afterSeconds,
+                    text: stage.texts[randomIndex],
+                };
+            });
+        },
+
+        getThinkingMessage(elapsedSeconds) {
+            return this.selectedThinkingStages.reduce((currentMessage, stage) => {
+                if (elapsedSeconds >= stage.afterSeconds) {
+                    return stage.text;
+                }
+
+                return currentMessage;
+            }, this.defaultThinkingMessage);
+        },
+
+        updateThinkingMessage() {
+            if (this.thinkingStartedAt === null) {
+                this.thinkingMessage = this.defaultThinkingMessage;
+
+                return;
+            }
+
+            const elapsedSeconds = Math.floor((Date.now() - this.thinkingStartedAt) / 1000);
+
+            this.thinkingMessage = this.getThinkingMessage(elapsedSeconds);
+        },
+
+        startThinking() {
+            this.stopThinking();
+
+            this.selectedThinkingStages = this.pickThinkingStages();
+            this.thinkingStartedAt = Date.now();
+            this.updateThinkingMessage();
+            this.thinkingMessageTimer = window.setInterval(() => this.updateThinkingMessage(), 1000);
+
+            this.thinking = true;
+        },
+
+        stopThinking() {
+            if (this.thinkingMessageTimer !== null) {
+                window.clearInterval(this.thinkingMessageTimer);
+                this.thinkingMessageTimer = null;
+            }
+
+            this.thinkingStartedAt = null;
+            this.selectedThinkingStages = [];
+            this.thinkingMessage = this.defaultThinkingMessage;
+            this.thinking = false;
         }
     }"
     id="container" 
@@ -492,7 +634,6 @@ new #[Title('Agentic Chat')] class extends Component
                                 inline
                                 class="w-full max-w-2xl"
                             >
-
                                 @if (strpos($message['content'], 'Tasks list updated') === 0)
                                     @php
                                         // Extract the tasks from the message content
@@ -554,6 +695,25 @@ new #[Title('Agentic Chat')] class extends Component
 
                     </div>
                 @endforeach
+
+                {{-- Thinking message --}}
+                <div x-show="thinking" x-cloak class="flex w-full mb-3 justify-end">
+                    <div class="flex items-start gap-3 max-w-[75%] flex-row-reverse animate-pulse">
+                        <div class="flex-shrink-0 size-8 rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-sm ring-1 ring-violet-400/30">
+                            <flux:icon.cpu-chip class="size-4 text-white" />
+                        </div>
+                        <div class="flex flex-col gap-1 items-end min-w-0 w-full">
+                            <div class="flex items-center gap-2">
+                                <span class="text-xs text-zinc-400 dark:text-zinc-500">Just now</span>
+                                <span class="text-xs font-semibold text-violet-600 dark:text-violet-400">Synthera</span>
+                            </div>
+                            <div class="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl rounded-tr-sm px-5 py-4 shadow-sm">
+                                <div class="chat-markdown text-zinc-800 dark:text-zinc-200" x-text="thinkingMessage"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
             </div>
         </div>
 
@@ -671,18 +831,6 @@ new #[Title('Agentic Chat')] class extends Component
                     </div>
                 </div>
 
-                {{-- <flux:text>
-                    /user/home/...
-                </flux:text>
-
-                <flux:button 
-                    size="sm" 
-                    variant="outline" 
-                    label="Change Directory" 
-                    icon="folder-open" 
-                    x-on:click="$wire.sendToast('Change directory functionality not implemented yet.', '', 'danger')"
-                /> --}}
-
                 <div class="flex justify-between items-start gap-2 mt-2 mb-4">
                     <div class="w-2/3">
                         <flux:subheading size="lg">Security:</flux:subheading>
@@ -784,7 +932,10 @@ new #[Title('Agentic Chat')] class extends Component
                 <flux:subheading>Context Window</flux:subheading>
 
                 <flux:text>
-                    Context: x / y (z%)
+                    Context: 
+                    {{ number_format($contextSizeBytes) }}b / 
+                    {{ number_format($maxContextSizeBytes) }}b 
+                    ({{ ROUND(100 * $contextSizeBytes / $maxContextSizeBytes, 1) }}%)
                 </flux:text>
 
                 <flux:subheading>Context Actions</flux:subheading>
@@ -794,7 +945,15 @@ new #[Title('Agentic Chat')] class extends Component
                     variant="outline" 
                     label="Condense Context" 
                     icon="arrows-pointing-in" 
-                    x-on:click="$wire.sendToast('Condense context functionality not implemented yet.', '', 'danger')"
+                    wire:click="condenseContext()"
+                />
+
+                <flux:button 
+                    size="sm" 
+                    variant="outline" 
+                    label="Clear Context" 
+                    icon="trash" 
+                    wire:click="clearContext()"
                 />
             </flux:card>
 
