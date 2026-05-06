@@ -52,6 +52,8 @@ new #[Title('Agentic Chat')] class extends Component
     public string $selectedProject = '';
 
     public array $availableProjects = [];
+
+    public array $toolResults = [];
     
     #[Computed]
     public function messages(): Collection
@@ -241,7 +243,28 @@ new #[Title('Agentic Chat')] class extends Component
             model: $this->currentModel,
             message: $this->originalPrompt,
             originalPrompt: $this->originalPrompt,
+            taskResults: $this->toolResults,
         );
+
+        $this->loadSessionData();
+
+        $this->dispatch('scroll-to-bottom');
+    }
+
+    public function runToolsForTask(ToolService $toolService, int $taskNum): void
+    {
+        $this->syncSessionConfiguration();
+
+        $toolResults = $toolService->runToolsForTask(
+            sessionId: $this->sessionId,
+            type: $this->currentChatType,
+            model: $this->currentModel,
+            message: $this->originalPrompt,
+            tasks: $this->tasks,
+            task: $taskNum,
+        );
+
+        $this->toolResults[$taskNum] = $toolResults;
 
         $this->loadSessionData();
 
@@ -252,6 +275,13 @@ new #[Title('Agentic Chat')] class extends Component
     {
         $this->syncSessionConfiguration();
 
+        // dd(
+        //     "about to workOnTask",
+        //     $taskNum,
+        //     $this->toolResults,
+        //     $this->toolResults[$taskNum] ?? null,
+        // );
+
         $taskResults = $chatService->workOnTask(
             sessionId: $this->sessionId,
             type: $this->currentChatType,
@@ -259,6 +289,8 @@ new #[Title('Agentic Chat')] class extends Component
             message: $this->originalPrompt,
             tasks: $this->tasks,
             task: $taskNum,
+            toolResults: $this->toolResults[$taskNum] ?? [],
+            taskResults: $this->taskResults ?? [],
         );
 
         $this->loadSessionData();
@@ -340,24 +372,6 @@ new #[Title('Agentic Chat')] class extends Component
         $this->dispatch('scroll-to-bottom');
     }
 
-    public function runToolsForTask(ToolService $toolService, int $taskNum): void
-    {
-        $this->syncSessionConfiguration();
-
-        $toolService->runToolsForTask(
-            sessionId: $this->sessionId,
-            type: $this->currentChatType,
-            model: $this->currentModel,
-            message: $this->originalPrompt,
-            tasks: $this->tasks,
-            task: $taskNum,
-        );
-
-        $this->loadSessionData();
-
-        $this->dispatch('scroll-to-bottom');
-    }
-
     public function runCommand(string $command): void
     {
         if (! is_dir($this->selectedProject)) {
@@ -419,7 +433,7 @@ new #[Title('Agentic Chat')] class extends Component
             // Based on the task list and the original message, generate and apply a ChatSession title
             await $wire.assignSessionTitle();
 
-            // Skip if 'Reframe your question'
+            // Abort here if 'Reframe your question'
             if ($wire.tasks[0] && $wire.tasks[0].toLowerCase().includes('reframe your question')) {
                 return;
             }

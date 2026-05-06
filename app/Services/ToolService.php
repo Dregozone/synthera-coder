@@ -103,11 +103,16 @@ class ToolService
             If no tools need to be run, respond with "No tools needed". 
             Use the tool name exactly as written in the available tools list.
             Available tools: '.($availableTools !== '' ? $availableTools : 'No application tools available').'. 
-            Task: 
+            Try to only pick the most useful tool and use just that one rather than picking multiple tools to run for the task, for example, finding the 
+            composer version for a package could be done using ReadFile on ./composer.json, or with the bespoke tool FindComposerVersion, in this case always pick the 
+            bespoke tool and keep the general tools for wider tasks. 
+            Task: '.$tasks[$taskIndex].'. 
+            If any details are missing or the task is unclear, then refer to the original prompt for more information but keep your response in scope for the current task, 
+            Original prompt: '.$message.'.
         ';
 
         $response = $agent
-            ->prompt($instructions.$tasks[$taskIndex]);
+            ->prompt($instructions);
 
         $toolResults = [];
         foreach ($toolDefinitions as $toolDefinition) {

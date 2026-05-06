@@ -10,14 +10,14 @@ use Laravel\Ai\Contracts\Tool;
 use Laravel\Ai\Tools\Request;
 use Stringable;
 
-class ReadFile implements Tool
+class FindComposerVersion implements Tool
 {
     /**
      * Get the description of the tool's purpose.
      */
     public function description(): Stringable|string
     {
-        return 'This tool can be used to check if a file exists or read the contents of a file.';
+        return 'This tool can be used to find the version of composer packages that are installed in the project.';
     }
 
     /**
@@ -26,9 +26,9 @@ class ReadFile implements Tool
     public function handle(Request $request): Stringable|string
     {
         $fileService = new FileService();
-
+        
         $filePath = $fileService->resolveFilePath(
-            filePath: (string) $request['value'],
+            filePath: 'composer.lock',
             currentWorkingDirectory: ChatSession::query()->latest('updated_at')->value('current_working_directory'),
         );
 
@@ -40,7 +40,20 @@ class ReadFile implements Tool
             return "File not found: $filePath";
         }
 
-        return File::get($filePath);
+        $contents = File::get($filePath);
+
+        $contentsArr = json_decode($contents, true);
+
+        if (! isset($contentsArr['packages']) || ! is_array($contentsArr['packages'])) {
+            return "No packages found in composer.lock";
+        }
+
+        $versionNumber = collect($contentsArr['packages'])
+            ->where('name', (string) $request['value'])
+            ->pluck('version')
+            ->first();
+
+        return $versionNumber ?? "Package not found in composer.lock: {$request['value']}";
     }
 
     /**
