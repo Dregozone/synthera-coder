@@ -58,6 +58,24 @@ test('working directory switch button closes the modal via flux alpine helper', 
     $response->assertSee('$flux.modal(\'change-directory\').close()', escape: false);
 });
 
+test('chat page includes bucketed thinking messages and resets the timer state', function (): void {
+    $session = ChatSession::create();
+
+    $response = get(route('home', ['sessionId' => $session->id]));
+
+    $response->assertOk();
+    $response->assertSee('thinkingStageBuckets:', escape: false);
+    $response->assertSee('Warming up the gears...');
+    $response->assertSee('Preparing the brainwaves...');
+    $response->assertSee('Thinking harder...');
+    $response->assertSee('Going full detective mode...');
+    $response->assertSee('Reasoning at full tilt...');
+    $response->assertSee('this.selectedThinkingStages = this.pickThinkingStages()', escape: false);
+    $response->assertSee('this.selectedThinkingStages = []', escape: false);
+    $response->assertSee('this.thinkingStartedAt = Date.now()', escape: false);
+    $response->assertSee('window.clearInterval(this.thinkingMessageTimer)', escape: false);
+});
+
 test('adding a message increments the cached session counters', function (): void {
     $session = ChatSession::create();
     $originalUpdatedAt = $session->updated_at->copy();

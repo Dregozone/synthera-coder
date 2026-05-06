@@ -466,6 +466,24 @@ new #[Title('Agentic Chat')] class extends Component
 
         thinkingMessage: 'Thinking...',
 
+        defaultThinkingMessage: 'Thinking...',
+
+        thinkingStartedAt: null,
+
+        thinkingMessageTimer: null,
+
+        selectedThinkingStages: [],
+
+        thinkingStageBuckets: [
+            { afterSeconds: 0, texts: ['Warming up the gears...', 'Preparing the brainwaves...', 'Getting the engine started...'] },
+            { afterSeconds: 5, texts: ['Thinking...', 'Sizing things up...', 'Sketching the first pass...'] },
+            { afterSeconds: 10, texts: ['Thinking harder...', 'Turning over the tricky bits...', 'Working through the moving parts...'] },
+            { afterSeconds: 20, texts: ['Connecting the dots...', 'Following the breadcrumb trail...', 'Lining up the puzzle pieces...'] },
+            { afterSeconds: 30, texts: ['Digging through the details...', 'Inspecting the deeper layers...', 'Pressure-testing the assumptions...'] },
+            { afterSeconds: 45, texts: ['Running the deep pass...', 'Going full detective mode...', 'Sweeping for edge cases...'] },
+            { afterSeconds: 60, texts: ['Reasoning at full tilt...', 'Operating at maximum overthink...', 'Still cooking, but we are close...'] },
+        ],
+
         editTitle() {
             const newTitle = prompt('Enter a new title for this chat session:', '{{ $sessionTitle }}');
 
@@ -531,13 +549,59 @@ new #[Title('Agentic Chat')] class extends Component
             await $wire.sendToast('Finished running command: ' + command, '', 'success');
         },
 
+        pickThinkingStages() {
+            return this.thinkingStageBuckets.map((stage) => {
+                const randomIndex = Math.floor(Math.random() * stage.texts.length);
+
+                return {
+                    afterSeconds: stage.afterSeconds,
+                    text: stage.texts[randomIndex],
+                };
+            });
+        },
+
+        getThinkingMessage(elapsedSeconds) {
+            return this.selectedThinkingStages.reduce((currentMessage, stage) => {
+                if (elapsedSeconds >= stage.afterSeconds) {
+                    return stage.text;
+                }
+
+                return currentMessage;
+            }, this.defaultThinkingMessage);
+        },
+
+        updateThinkingMessage() {
+            if (this.thinkingStartedAt === null) {
+                this.thinkingMessage = this.defaultThinkingMessage;
+
+                return;
+            }
+
+            const elapsedSeconds = Math.floor((Date.now() - this.thinkingStartedAt) / 1000);
+
+            this.thinkingMessage = this.getThinkingMessage(elapsedSeconds);
+        },
+
         startThinking() {
-            this.thinkingMessage = 'Thinking harder...';
+            this.stopThinking();
+
+            this.selectedThinkingStages = this.pickThinkingStages();
+            this.thinkingStartedAt = Date.now();
+            this.updateThinkingMessage();
+            this.thinkingMessageTimer = window.setInterval(() => this.updateThinkingMessage(), 1000);
 
             this.thinking = true;
         },
 
         stopThinking() {
+            if (this.thinkingMessageTimer !== null) {
+                window.clearInterval(this.thinkingMessageTimer);
+                this.thinkingMessageTimer = null;
+            }
+
+            this.thinkingStartedAt = null;
+            this.selectedThinkingStages = [];
+            this.thinkingMessage = this.defaultThinkingMessage;
             this.thinking = false;
         }
     }"
