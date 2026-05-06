@@ -11,7 +11,7 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('chat_sessions', function (Blueprint $table) {
+        Schema::table('chat_sessions', function (Blueprint $table): void {
             $table->string('current_working_directory')->nullable()->after('current_chat_type');
         });
     }
@@ -21,7 +21,7 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::table('chat_sessions', function (Blueprint $table) {
+        Schema::table('chat_sessions', function (Blueprint $table): void {
             $table->dropColumn('current_working_directory');
         });
     }

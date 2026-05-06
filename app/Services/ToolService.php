@@ -39,9 +39,7 @@ class ToolService
                 return (new ReflectionClass($class))->isInstantiable();
             })
             ->sort()
-            ->map(function ($class) {
-                return new $class;
-            })
+            ->map(fn($class) => new $class)
             ->values()
             ->all();
     }
@@ -52,14 +50,12 @@ class ToolService
     public function listToolDefinitions(): array
     {
         return collect($this->listTools())
-            ->map(function (Tool $tool): array {
-                return [
-                    'name' => class_basename($tool),
-                    'class' => $tool::class,
-                    'description' => trim((string) $tool->description()),
-                    'tool' => $tool,
-                ];
-            })
+            ->map(fn(Tool $tool): array => [
+                'name' => class_basename($tool),
+                'class' => $tool::class,
+                'description' => trim((string) $tool->description()),
+                'tool' => $tool,
+            ])
             ->values()
             ->all();
     }

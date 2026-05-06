@@ -122,12 +122,10 @@ new #[Title('Agentic Chat')] class extends Component
         // Find the sibling projects
         $this->availableProjects = collect(glob(base_path() . '/../*', GLOB_ONLYDIR))
             ->sortBy(fn($path) => strtolower(basename($path)))
-            ->map(function ($path) {
-                return [
-                    'name' => basename($path),
-                    'id' => str_replace('synthera-coder/../', '', $path),
-                ];
-            })
+            ->map(fn($path) => [
+                'name' => basename((string) $path),
+                'id' => str_replace('synthera-coder/../', '', $path),
+            ])
             ->pluck('id', 'name')
             ->toArray();
 
