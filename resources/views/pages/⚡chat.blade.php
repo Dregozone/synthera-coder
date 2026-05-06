@@ -462,6 +462,10 @@ new #[Title('Agentic Chat')] class extends Component
 
 <div
     x-data="{
+        thinking: false,
+
+        thinkingMessage: 'Thinking...',
+
         editTitle() {
             const newTitle = prompt('Enter a new title for this chat session:', '{{ $sessionTitle }}');
 
@@ -482,10 +486,14 @@ new #[Title('Agentic Chat')] class extends Component
             await $wire.sendMessage();
 
             // Based on the users message, derive a tasks list
+            this.startThinking();
             await $wire.updateTasks();
+            this.stopThinking();
 
             // Based on the task list and the original message, generate and apply a ChatSession title
+            this.startThinking();
             await $wire.assignSessionTitle();
+            this.stopThinking();
 
             // Abort here if 'Reframe your question'
             if ($wire.tasks[0] && $wire.tasks[0].toLowerCase().includes('reframe your question')) {
@@ -495,16 +503,24 @@ new #[Title('Agentic Chat')] class extends Component
             for (let i = 0; i < $wire.tasks.length; i++) {
                 let taskNumber = i + 1;
 
+                this.startThinking();
                 await $wire.startOnTask(taskNumber);
+                this.stopThinking();
 
                 // Per task find the required tools to solve the task and run them to get the necessary information to complete the task
+                this.startThinking();
                 await $wire.runToolsForTask(taskNumber);
+                this.stopThinking();
 
+                this.startThinking();
                 await $wire.workOnTask(taskNumber);
+                this.stopThinking();
             }
 
             // Only then fetch the assistant response
+            this.startThinking();
             await $wire.findAssistantResponse();
+            this.stopThinking();
         },
 
         async runCommand(command) {
@@ -513,6 +529,16 @@ new #[Title('Agentic Chat')] class extends Component
             await $wire.runCommand(command);
 
             await $wire.sendToast('Finished running command: ' + command, '', 'success');
+        },
+
+        startThinking() {
+            this.thinkingMessage = 'Thinking harder...';
+
+            this.thinking = true;
+        },
+
+        stopThinking() {
+            this.thinking = false;
         }
     }"
     id="container" 
@@ -546,7 +572,6 @@ new #[Title('Agentic Chat')] class extends Component
                                 inline
                                 class="w-full max-w-2xl"
                             >
-
                                 @if (strpos($message['content'], 'Tasks list updated') === 0)
                                     @php
                                         // Extract the tasks from the message content
@@ -608,6 +633,25 @@ new #[Title('Agentic Chat')] class extends Component
 
                     </div>
                 @endforeach
+
+                {{-- Thinking message --}}
+                <div x-show="thinking" x-cloak class="flex w-full mb-3 justify-end">
+                    <div class="flex items-start gap-3 max-w-[75%] flex-row-reverse animate-pulse">
+                        <div class="flex-shrink-0 size-8 rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-sm ring-1 ring-violet-400/30">
+                            <flux:icon.cpu-chip class="size-4 text-white" />
+                        </div>
+                        <div class="flex flex-col gap-1 items-end min-w-0 w-full">
+                            <div class="flex items-center gap-2">
+                                <span class="text-xs text-zinc-400 dark:text-zinc-500">Just now</span>
+                                <span class="text-xs font-semibold text-violet-600 dark:text-violet-400">Synthera</span>
+                            </div>
+                            <div class="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl rounded-tr-sm px-5 py-4 shadow-sm">
+                                <div class="chat-markdown text-zinc-800 dark:text-zinc-200" x-text="thinkingMessage"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
             </div>
         </div>
 
