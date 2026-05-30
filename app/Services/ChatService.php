@@ -261,7 +261,7 @@ class ChatService
         string $by,
         string $content,
     ): void {
-        $message = ChatMessage::create([
+        $chatMessage = ChatMessage::create([
             'chat_session_id' => $sessionId,
             'type' => $type,
             'by' => $by,
@@ -277,11 +277,11 @@ class ChatService
 
         $contextService = new ContextService($sessionId);
         $contextService->push('chat_history', [
-            'id' => $message->id,
+            'id' => $chatMessage->id,
             'type' => $type,
             'by' => $by,
             'content' => $content,
-            'created_at' => $message->created_at?->toIso8601String(),
+            'created_at' => $chatMessage->created_at?->toIso8601String(),
         ]);
     }
 
