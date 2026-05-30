@@ -147,10 +147,9 @@ new #[Title('Agentic Chat')] class extends Component
 
             $this->tempSelectedProject = $this->selectedProject; // For the modal form
 
-            // Update the context
-            $contextService = new ContextService($this->sessionId);
-            $this->context = $contextService->getContext();
-            $this->contextSizeBytes = $contextService->getContextSizeBytes();
+            $contextService = $this->contextService();
+            $this->persistSessionSnapshot($contextService);
+            $this->syncContextState($contextService);
         }
     }
 
@@ -162,6 +161,150 @@ new #[Title('Agentic Chat')] class extends Component
                 'current_model' => $this->currentModel,
                 'current_chat_type' => $this->currentChatType,
             ]);
+
+        $this->persistSessionSnapshot($this->contextService());
+    }
+
+    private function contextService(): ContextService
+    {
+        return new ContextService($this->sessionId);
+    }
+
+    private function persistSessionSnapshot(ContextService $contextService): void
+    {
+        $contextService->set('session', [
+            'id' => $this->sessionId,
+            'title' => $this->sessionTitle,
+            'number_of_messages' => $this->numberOfMessages,
+            'current_model' => $this->currentModel,
+            'current_chat_type' => $this->currentChatType,
+            'current_working_directory' => $this->selectedProject,
+            'updated_at' => now()->toIso8601String(),
+        ]);
+    }
+
+    private function currentRequestIndex(ContextService $contextService): ?int
+    {
+        $currentRequestIndex = $contextService->get('current_request_index');
+
+        if (is_int($currentRequestIndex)) {
+            return $currentRequestIndex;
+        }
+
+        $requests = $contextService->get('requests', []);
+
+        return is_array($requests) && $requests !== [] ? array_key_last($requests) : null;
+    }
+
+    private function currentRequestPath(ContextService $contextService): ?string
+    {
+        $currentRequestIndex = $this->currentRequestIndex($contextService);
+
+        return $currentRequestIndex === null ? null : "requests.{$currentRequestIndex}";
+    }
+
+    private function currentRequest(ContextService $contextService): array
+    {
+        $currentRequestPath = $this->currentRequestPath($contextService);
+
+        if ($currentRequestPath === null) {
+            return [];
+        }
+
+        $request = $contextService->get($currentRequestPath, []);
+
+        return is_array($request) ? $request : [];
+    }
+
+    private function taskPayloadsFromContext(ContextService $contextService): array
+    {
+        $tasks = $this->currentRequest($contextService)['tasks'] ?? [];
+
+        return is_array($tasks) ? $tasks : [];
+    }
+
+    private function tasksFromContext(ContextService $contextService): array
+    {
+        return array_values(array_map(
+            static fn (array $task): string => (string) ($task['content'] ?? ''),
+            array_filter($this->taskPayloadsFromContext($contextService), is_array(...)),
+        ));
+    }
+
+    private function taskStatusesFromContext(ContextService $contextService): array
+    {
+        $statuses = [];
+
+        foreach ($this->taskPayloadsFromContext($contextService) as $task) {
+            if (! is_array($task)) {
+                continue;
+            }
+
+            $taskNumber = (int) ($task['number'] ?? 0);
+
+            if ($taskNumber < 1) {
+                continue;
+            }
+
+            $statuses[$taskNumber] = (string) ($task['status'] ?? 'Pending');
+        }
+
+        return $statuses;
+    }
+
+    private function toolResultsFromContext(ContextService $contextService): array
+    {
+        $toolResults = [];
+
+        foreach ($this->taskPayloadsFromContext($contextService) as $task) {
+            if (! is_array($task)) {
+                continue;
+            }
+
+            $taskNumber = (int) ($task['number'] ?? 0);
+
+            if ($taskNumber < 1) {
+                continue;
+            }
+
+            $toolResults[$taskNumber] = is_array($task['tool_results'] ?? null)
+                ? $task['tool_results']
+                : [];
+        }
+
+        return $toolResults;
+    }
+
+    private function taskResultsFromContext(ContextService $contextService): array
+    {
+        $taskResults = [];
+
+        foreach ($this->taskPayloadsFromContext($contextService) as $task) {
+            if (! is_array($task)) {
+                continue;
+            }
+
+            $taskNumber = (int) ($task['number'] ?? 0);
+
+            if ($taskNumber < 1 || ! array_key_exists('response', $task) || $task['response'] === null || $task['response'] === '') {
+                continue;
+            }
+
+            $taskResults[$taskNumber] = (string) ($task['response'] ?? '');
+        }
+
+        return $taskResults;
+    }
+
+    private function syncContextState(ContextService $contextService): void
+    {
+        $this->context = $contextService->getContext() ?? [];
+        $this->contextSizeBytes = $contextService->getContextSizeBytes();
+        $this->originalPrompt = (string) ($this->currentRequest($contextService)['original_message'] ?? '');
+        $this->tasks = $this->tasksFromContext($contextService);
+        $this->taskStatuses = $this->taskStatusesFromContext($contextService);
+        $this->toolResults = $this->toolResultsFromContext($contextService);
+        $this->taskResults = $this->taskResultsFromContext($contextService);
     }
 
     public function loadOlderMessages(): void
@@ -207,6 +350,9 @@ new #[Title('Agentic Chat')] class extends Component
         $this->tasks = [
             'Building task list...',
         ];
+        $this->taskResults = [];
+        $this->taskStatuses = [];
+        $this->toolResults = [];
 
         $this->syncSessionConfiguration();
 
@@ -217,8 +363,26 @@ new #[Title('Agentic Chat')] class extends Component
             message: $this->originalPrompt,
         );
 
-        $contextService = new ContextService($this->sessionId);
-        $contextService->upsertInContext('originalMessage', $this->originalPrompt);
+        $contextService = $this->contextService();
+        $requests = $contextService->get('requests', []);
+
+        if (! is_array($requests)) {
+            $requests = [];
+        }
+
+        $requests[] = [
+            'original_message' => $this->originalPrompt,
+            'agent' => $this->currentModel,
+            'message_type' => $this->currentChatType,
+            'working_directory' => $this->selectedProject,
+            'tasks' => [],
+            'final_response' => null,
+            'created_at' => now()->toIso8601String(),
+            'updated_at' => now()->toIso8601String(),
+        ];
+
+        $contextService->set('requests', array_values($requests));
+        $contextService->set('current_request_index', array_key_last($requests));
 
         $this->loadSessionData();
 
@@ -229,21 +393,35 @@ new #[Title('Agentic Chat')] class extends Component
     {
         $this->syncSessionConfiguration();
 
+        $contextService = $this->contextService();
+        $currentRequest = $this->currentRequest($contextService);
+
         $tasks = $chatService->updateTasks(
             sessionId: $this->sessionId,
             type: $this->currentChatType,
             model: $this->currentModel,
-            message: $this->originalPrompt,
+            message: (string) ($currentRequest['original_message'] ?? $this->originalPrompt),
         );
 
-        $this->tasks = $tasks;
+        $currentRequestPath = $this->currentRequestPath($contextService);
 
-        $contextService = new ContextService($this->sessionId);
-        $contextService->upsertInContext('tasks', $tasks);
+        if ($currentRequestPath !== null) {
+            $structuredTasks = [];
 
-        $this->taskStatuses = [];
-        foreach ($tasks as $index => $task) {
-            $this->taskStatuses[$index + 1] = 'Pending';
+            foreach ($tasks as $index => $task) {
+                $structuredTasks[] = [
+                    'number' => $index + 1,
+                    'content' => $task,
+                    'status' => 'Pending',
+                    'tool_calls' => [],
+                    'tool_results' => [],
+                    'summary' => null,
+                    'response' => null,
+                ];
+            }
+
+            $contextService->set("{$currentRequestPath}.tasks", $structuredTasks);
+            $contextService->set("{$currentRequestPath}.updated_at", now()->toIso8601String());
         }
 
         $this->loadSessionData();
@@ -255,17 +433,28 @@ new #[Title('Agentic Chat')] class extends Component
     {
         $this->syncSessionConfiguration();
 
+        $contextService = $this->contextService();
+        $currentRequest = $this->currentRequest($contextService);
+        $currentRequestPath = $this->currentRequestPath($contextService);
+
         $response = $chatService->findAssistantResponse(
             sessionId: $this->sessionId,
             type: $this->currentChatType,
             model: $this->currentModel,
-            message: $this->originalPrompt,
-            originalPrompt: $this->originalPrompt,
-            taskResults: $this->toolResults,
+            message: (string) ($currentRequest['original_message'] ?? $this->originalPrompt),
+            originalPrompt: (string) ($currentRequest['original_message'] ?? $this->originalPrompt),
+            taskResults: $this->taskResultsFromContext($contextService),
         );
 
-        $contextService = new ContextService($this->sessionId);
-        $contextService->addToContext('messages', $response);
+        if ($currentRequestPath !== null) {
+            $contextService->set("{$currentRequestPath}.final_response", [
+                'content' => $response,
+                'agent' => $this->currentModel,
+                'message_type' => $this->currentChatType,
+                'created_at' => now()->toIso8601String(),
+            ]);
+            $contextService->set("{$currentRequestPath}.updated_at", now()->toIso8601String());
+        }
 
         $this->loadSessionData();
 
@@ -276,19 +465,31 @@ new #[Title('Agentic Chat')] class extends Component
     {
         $this->syncSessionConfiguration();
 
+        $contextService = $this->contextService();
+        $currentRequest = $this->currentRequest($contextService);
+        $tasks = $this->tasksFromContext($contextService);
+        $currentRequestPath = $this->currentRequestPath($contextService);
+
         $toolResults = $toolService->runToolsForTask(
             sessionId: $this->sessionId,
             type: $this->currentChatType,
             model: $this->currentModel,
-            message: $this->originalPrompt,
-            tasks: $this->tasks,
+            message: (string) ($currentRequest['original_message'] ?? $this->originalPrompt),
+            tasks: $tasks,
             task: $taskNum,
         );
 
-        $this->toolResults[$taskNum] = $toolResults;
-
-        $contextService = new ContextService($this->sessionId);
-        $contextService->addToContext('toolResults', $toolResults);
+        if ($currentRequestPath !== null) {
+            $taskPath = "{$currentRequestPath}.tasks.".($taskNum - 1);
+            $contextService->push("{$taskPath}.tool_calls", [
+                'task_number' => $taskNum,
+                'task' => $tasks[$taskNum - 1] ?? null,
+                'results' => $toolResults,
+                'created_at' => now()->toIso8601String(),
+            ]);
+            $contextService->set("{$taskPath}.tool_results", $toolResults);
+            $contextService->set("{$taskPath}.updated_at", now()->toIso8601String());
+        }
 
         $this->loadSessionData();
 
@@ -299,36 +500,47 @@ new #[Title('Agentic Chat')] class extends Component
     {
         $this->syncSessionConfiguration();
 
-        $taskResults = $chatService->workOnTask(
+        $contextService = $this->contextService();
+        $tasks = $this->tasksFromContext($contextService);
+        $currentRequestPath = $this->currentRequestPath($contextService);
+        $taskWork = $chatService->workOnTask(
             sessionId: $this->sessionId,
             type: $this->currentChatType,
             model: $this->currentModel,
-            message: $this->originalPrompt,
-            tasks: $this->tasks,
+            message: (string) ($this->currentRequest($contextService)['original_message'] ?? $this->originalPrompt),
+            tasks: $tasks,
             task: $taskNum,
-            toolResults: $this->toolResults[$taskNum] ?? [],
-            taskResults: $this->taskResults ?? [],
+            toolResults: $this->toolResultsFromContext($contextService)[$taskNum] ?? [],
+            taskResults: $this->taskResultsFromContext($contextService),
         );
 
+        if ($currentRequestPath !== null) {
+            $taskPath = "{$currentRequestPath}.tasks.".($taskNum - 1);
+            $contextService->set("{$taskPath}.response", $taskWork['response'] ?? '');
+            $contextService->set("{$taskPath}.summary", $taskWork['summary'] ?? '');
+            $contextService->set("{$taskPath}.status", 'Done');
+            $contextService->set("{$taskPath}.updated_at", now()->toIso8601String());
+        }
+
         $this->loadSessionData();
-
-        $this->taskResults[$taskNum] = $taskResults;
-        $this->taskStatuses[$taskNum] = 'Done';
-
-        $contextService = new ContextService($this->sessionId);
-        $contextService->addToContext('taskResults', $this->taskResults);
 
         $this->dispatch('scroll-to-bottom');
     }
 
     public function startOnTask(ChatService $chatService, int $taskNum): void
     {
-        $this->taskStatuses[$taskNum] = 'In Progress';
+        $contextService = $this->contextService();
+        $currentRequestPath = $this->currentRequestPath($contextService);
+
+        if ($currentRequestPath !== null) {
+            $contextService->set("{$currentRequestPath}.tasks.".($taskNum - 1).'.status', 'In Progress');
+            $contextService->set("{$currentRequestPath}.updated_at", now()->toIso8601String());
+        }
 
         $this->addMessage(
             type: $this->currentChatType,
             by: 'assistant', 
-            content: "Starting task $taskNum: " . ($this->tasks[$taskNum - 1] ?? 'Unknown Task')
+            content: "Starting task $taskNum: " . ($this->tasksFromContext($contextService)[$taskNum - 1] ?? 'Unknown Task')
         );
 
         $this->dispatch('scroll-to-bottom');
@@ -342,12 +554,13 @@ new #[Title('Agentic Chat')] class extends Component
             return; // Dont update an already populated title
         }
 
+        $contextService = $this->contextService();
         $title = $chatService->assignSessionTitle(
             sessionId: $this->sessionId,
             type: $this->currentChatType,
             model: $this->currentModel,
-            message: $this->originalPrompt,
-            tasks: $this->tasks,
+            message: (string) ($this->currentRequest($contextService)['original_message'] ?? $this->originalPrompt),
+            tasks: $this->tasksFromContext($contextService),
         );
 
         if ($title) {

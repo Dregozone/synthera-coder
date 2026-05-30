@@ -48,37 +48,56 @@ class ContextService
 
     public function upsertInContext(string $key, mixed $value): void
     {
-        if ($this->context === null) {
-            dd('Context not found!');
-        }
-
-        $this->context[$key] = $value;
-
-        $this->persistContext();
+        $this->set($key, $value);
     }
 
     public function addToContext(string $key, mixed $value): void
     {
-        if ($this->context === null) {
-            dd('Context not found!');
-        }
-
-        if (! isset($this->context[$key]) || ! is_array($this->context[$key])) {
-            $this->context[$key] = [];
-        }
-
-        $this->context[$key][] = $value;
-
-        $this->persistContext();
+        $this->push($key, $value);
     }
 
     public function getFromContext(string $key): mixed
+    {
+        return $this->get($key);
+    }
+
+    public function set(string $key, mixed $value): void
     {
         if ($this->context === null) {
             dd('Context not found!');
         }
 
-        return $this->context[$key] ?? null;
+        data_set($this->context, $key, $value);
+
+        $this->persistContext();
+    }
+
+    public function push(string $key, mixed $value): void
+    {
+        if ($this->context === null) {
+            dd('Context not found!');
+        }
+
+        $items = data_get($this->context, $key, []);
+
+        if (! is_array($items)) {
+            $items = [];
+        }
+
+        $items[] = $value;
+
+        data_set($this->context, $key, $items);
+
+        $this->persistContext();
+    }
+
+    public function get(string $key, mixed $default = null): mixed
+    {
+        if ($this->context === null) {
+            dd('Context not found!');
+        }
+
+        return data_get($this->context, $key, $default);
     }
 
     public function condenseContext(): void

@@ -128,20 +128,26 @@ class ChatService
         int $task,
         array $toolResults,
         array $taskResults,
-    ): string {
+    ): array {
         set_time_limit(300);
 
         // Adjust task index since the UI is 1 indexed but arrays are 0 indexed
         $taskIndex = $task - 1;
 
         if (! isset($tasks[$taskIndex])) {
-            return '';
+            return [
+                'response' => '',
+                'summary' => '',
+            ];
         }
 
         $agent = $this->findAgent($model, $sessionId);
 
         if ($agent == '') {
-            return '';
+            return [
+                'response' => '',
+                'summary' => '',
+            ];
         }
 
         // TODO: Also provide the details already found by completing previous tasks, this context will be valuable in assisting with the continued task work...
@@ -176,7 +182,10 @@ class ChatService
             content: "### Worked on task #{$task}\n\n{$summaryResponse->text}",
         );
 
-        return $response->text; // This is the full results, not the summary
+        return [
+            'response' => $response->text,
+            'summary' => $summaryResponse->text,
+        ];
     }
 
     public function assignSessionTitle(
@@ -252,7 +261,7 @@ class ChatService
         string $by,
         string $content,
     ): void {
-        ChatMessage::create([
+        $message = ChatMessage::create([
             'chat_session_id' => $sessionId,
             'type' => $type,
             'by' => $by,
@@ -265,6 +274,15 @@ class ChatService
                 'number_of_messages' => DB::raw('COALESCE(number_of_messages, 0) + 1'),
                 'updated_at' => now(),
             ]);
+
+        $contextService = new ContextService($sessionId);
+        $contextService->push('chat_history', [
+            'id' => $message->id,
+            'type' => $type,
+            'by' => $by,
+            'content' => $content,
+            'created_at' => $message->created_at?->toIso8601String(),
+        ]);
     }
 
     public function getMessagesForSession(int $sessionId): array
