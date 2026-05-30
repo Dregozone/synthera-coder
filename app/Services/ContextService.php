@@ -2,13 +2,11 @@
 
 namespace App\Services;
 
-use RuntimeException;
-
 class ContextService
 {
     public const MAX_CONTEXT_SIZE_BYTES = 10 * 1024;
 
-    private ?array $context;
+    private array $context;
 
     public function __construct(private readonly int $chatSessionId)
     {
@@ -17,10 +15,6 @@ class ContextService
 
     public function findContext(int $chatSessionId): array
     {
-        if ($chatSessionId === null) {
-            throw new RuntimeException('Chat session not found.');
-        }
-
         // Check if a sessions folder exists for this chat session, if not create one
         if (! is_dir(app_path('Ai/Sessions/'.$this->chatSessionId))) {
             mkdir(app_path('Ai/Sessions/'.$this->chatSessionId), 0755, true);
@@ -65,10 +59,6 @@ class ContextService
 
     public function set(string $key, mixed $value): void
     {
-        if ($this->context === null) {
-            throw new RuntimeException('Context not found.');
-        }
-
         data_set($this->context, $key, $value);
 
         $this->persistContext();
@@ -76,10 +66,6 @@ class ContextService
 
     public function push(string $key, mixed $value): void
     {
-        if ($this->context === null) {
-            throw new RuntimeException('Context not found.');
-        }
-
         $items = data_get($this->context, $key, []);
 
         if (! is_array($items)) {
@@ -95,19 +81,11 @@ class ContextService
 
     public function get(string $key, mixed $default = null): mixed
     {
-        if ($this->context === null) {
-            throw new RuntimeException('Context not found.');
-        }
-
         return data_get($this->context, $key, $default);
     }
 
     public function condenseContext(): void
     {
-        if ($this->context === null) {
-            throw new RuntimeException('Context not found.');
-        }
-
         // For now we just return the context as is, but in the future we could add some logic here to condense the context down to the most important details to keep it within token limits for the LLM.
         $condensedContext = $this->context;
         // //
@@ -125,29 +103,17 @@ class ContextService
 
     public function getContextFilePath(): string
     {
-        if ($this->chatSessionId === null) {
-            throw new RuntimeException('Chat session ID not found.');
-        }
-
         return app_path("Ai/Sessions/{$this->chatSessionId}/context.json");
     }
 
     private function persistContext(): void
     {
-        if ($this->context === null) {
-            throw new RuntimeException('Context not found.');
-        }
-
-        if ($this->chatSessionId === null) {
-            throw new RuntimeException('Chat session ID not found.');
-        }
-
         file_put_contents(app_path("Ai/Sessions/{$this->chatSessionId}/context.json"), json_encode($this->context));
     }
 
     public function getContext(): array
     {
-        return $this->context ?? [];
+        return $this->context;
     }
 
     public function getChatSessionId(): int
