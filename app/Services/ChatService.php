@@ -119,6 +119,9 @@ class ChatService
         return $refinedTasksArr;
     }
 
+    /**
+     * @return array{response: string, summary: string}
+     */
     public function workOnTask(
         int $sessionId,
         string $type,

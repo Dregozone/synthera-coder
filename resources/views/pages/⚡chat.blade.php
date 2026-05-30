@@ -286,7 +286,7 @@ new #[Title('Agentic Chat')] class extends Component
 
             $taskNumber = (int) ($task['number'] ?? 0);
 
-            if ($taskNumber < 1 || ! array_key_exists('response', $task) || $task['response'] === null || $task['response'] === '') {
+            if ($taskNumber < 1 || ! $this->hasTaskResponse($task)) {
                 continue;
             }
 
@@ -296,9 +296,16 @@ new #[Title('Agentic Chat')] class extends Component
         return $taskResults;
     }
 
+    private function hasTaskResponse(array $task): bool
+    {
+        return array_key_exists('response', $task)
+            && $task['response'] !== null
+            && $task['response'] !== '';
+    }
+
     private function syncContextState(ContextService $contextService): void
     {
-        $this->context = $contextService->getContext() ?? [];
+        $this->context = $contextService->getContext();
         $this->contextSizeBytes = $contextService->getContextSizeBytes();
         $this->originalPrompt = (string) ($this->currentRequest($contextService)['original_message'] ?? '');
         $this->tasks = $this->tasksFromContext($contextService);
@@ -503,7 +510,7 @@ new #[Title('Agentic Chat')] class extends Component
         $contextService = $this->contextService();
         $tasks = $this->tasksFromContext($contextService);
         $currentRequestPath = $this->currentRequestPath($contextService);
-        $taskWork = $chatService->workOnTask(
+        $taskWorkResult = $chatService->workOnTask(
             sessionId: $this->sessionId,
             type: $this->currentChatType,
             model: $this->currentModel,
@@ -516,8 +523,8 @@ new #[Title('Agentic Chat')] class extends Component
 
         if ($currentRequestPath !== null) {
             $taskPath = "{$currentRequestPath}.tasks.".($taskNum - 1);
-            $contextService->set("{$taskPath}.response", $taskWork['response'] ?? '');
-            $contextService->set("{$taskPath}.summary", $taskWork['summary'] ?? '');
+            $contextService->set("{$taskPath}.response", $taskWorkResult['response'] ?? '');
+            $contextService->set("{$taskPath}.summary", $taskWorkResult['summary'] ?? '');
             $contextService->set("{$taskPath}.status", 'Done');
             $contextService->set("{$taskPath}.updated_at", now()->toIso8601String());
         }

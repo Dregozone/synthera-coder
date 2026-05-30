@@ -145,6 +145,7 @@ test('chat page hydrates workflow state from the current request context file', 
     $contextService->set('current_request_index', 0);
 
     Livewire::test('pages::chat', ['sessionId' => $session->id])
+        // Tasks are displayed from the 0-based request task list, while status/result maps stay keyed by 1-based task number.
         ->assertSet('originalPrompt', 'Inspect the composer constraints')
         ->assertSet('tasks.0', 'Read composer.json')
         ->assertSet('taskStatuses.1', 'Done')
