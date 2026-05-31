@@ -14,7 +14,8 @@ use Laravel\Ai\Promptable;
 use Stringable;
 
 #[Provider('lmstudio')]
-#[Model('qwen/qwen3.5-9b')]
+// #[Model('qwen/qwen3.5-9b')]
+#[Model('qwen2.5-coder-1.5b-instruct')]
 #[Timeout(300)]
 class Qwen3_8b_8k implements Agent, Conversational, HasTools
 {
