@@ -2,11 +2,10 @@
 
 return [
     'chat_models' => [
-        'qwen3:8b-8k',
-        'qwen3:14b-16k',
+        'qwen/qwen3.5-9b',
     ],
 
-    'default_chat_model' => 'qwen3:8b-8k',
+    'default_chat_model' => 'qwen/qwen3.5-9b',
 
     'chat_types' => [
         'ask' => 'question-mark-circle',

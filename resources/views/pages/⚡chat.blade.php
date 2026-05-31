@@ -60,7 +60,7 @@ new #[Title('Agentic Chat')] class extends Component
 
     public int $contextSizeBytes = 0;
 
-    public int $maxContextSizeBytes = 10;
+    public int $maxContextSizeBytes = 32;
     
     #[Computed]
     public function messages(): Collection
@@ -933,8 +933,8 @@ new #[Title('Agentic Chat')] class extends Component
 
                 <flux:text>
                     Context: 
-                    {{ number_format($contextSizeBytes) }}b / 
-                    {{ number_format($maxContextSizeBytes) }}b 
+                    {{ number_format($contextSizeBytes) }}k / 
+                    {{ number_format($maxContextSizeBytes) }}k 
                     ({{ ROUND(100 * $contextSizeBytes / $maxContextSizeBytes, 1) }}%)
                 </flux:text>
 

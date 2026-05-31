@@ -9,13 +9,13 @@ use Laravel\Ai\Contracts\Agent;
 use Laravel\Ai\Contracts\Conversational;
 use Laravel\Ai\Contracts\HasTools;
 use Laravel\Ai\Contracts\Tool;
-use Laravel\Ai\Enums\Lab;
 use Laravel\Ai\Messages\Message;
 use Laravel\Ai\Promptable;
 use Stringable;
 
-#[Provider(Lab::Ollama)]
-#[Model('qwen3:8b-8k')]
+#[Provider('lmstudio')]
+// #[Model('qwen/qwen3.5-9b')]
+#[Model('qwen2.5-coder-1.5b-instruct')]
 #[Timeout(300)]
 class Qwen3_8b_8k implements Agent, Conversational, HasTools
 {

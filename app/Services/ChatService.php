@@ -279,7 +279,7 @@ class ChatService
 
     public function findAgent(string $model, int $sessionId): Qwen3_8b_8k|string
     {
-        if ($model === 'qwen3:8b-8k') {
+        if (in_array($model, ['qwen/qwen3.5-9b', 'qwen3.5-9b', 'qwen3:8b-8k'], true)) {
             return new Qwen3_8b_8k;
 
         } elseif ($model === 'qwen3:14b-16k') {
