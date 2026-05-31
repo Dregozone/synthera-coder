@@ -13,6 +13,10 @@ Route::livewire('/', 'pages::chat')->name('home');
 
 // require __DIR__.'/settings.php';
 
+Route::get('/hello', function () {
+    return 'Hello World';
+});
+
 Route::get('/test', function () {
     $response = (new Qwen3_8b_8k)
         ->prompt('Hi there');

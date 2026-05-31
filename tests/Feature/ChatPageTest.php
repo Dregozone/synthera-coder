@@ -100,6 +100,33 @@ test('adding a message increments the cached session counters', function (): voi
     expect($session->updated_at->greaterThan($originalUpdatedAt))->toBeTrue();
 });
 
+test('sending a message stores the current request in the context file', function (): void {
+    $session = ChatSession::create([
+        'current_model' => 'qwen3:8b-8k',
+        'current_chat_type' => 'chat',
+        'current_working_directory' => base_path(),
+    ]);
+
+    File::deleteDirectory(app_path("Ai/Sessions/{$session->id}"));
+
+    Livewire::test('pages::chat', ['sessionId' => $session->id])
+        ->set('originalPrompt', 'Capture this request in the context file')
+        ->call('sendMessage')
+        ->assertSet('tasks', [])
+        ->assertSet('taskResults', [])
+        ->assertSet('taskStatuses', [])
+        ->assertSet('toolResults', []);
+
+    $contextService = new ContextService($session->id);
+
+    expect($contextService->get('current_request_index'))->toBe(0)
+        ->and($contextService->get('requests.0.original_message'))->toBe('Capture this request in the context file')
+        ->and($contextService->get('requests.0.agent'))->toBe('qwen3:8b-8k')
+        ->and($contextService->get('requests.0.message_type'))->toBe('chat')
+        ->and($contextService->get('requests.0.working_directory'))->toBe(base_path())
+        ->and($contextService->get('requests.0.tasks'))->toBe([]);
+});
+
 test('chat page hydrates workflow state from the current request context file', function (): void {
     $session = ChatSession::create([
         'current_model' => 'qwen3:8b-8k',

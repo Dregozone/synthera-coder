@@ -4,7 +4,7 @@ namespace App\Services;
 
 class ContextService
 {
-    public const MAX_CONTEXT_SIZE_BYTES = 10 * 1024;
+    public const MAX_CONTEXT_SIZE_BYTES = 32 * 1024;
 
     private array $context;
 
