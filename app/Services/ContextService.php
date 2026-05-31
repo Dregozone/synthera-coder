@@ -4,9 +4,9 @@ namespace App\Services;
 
 class ContextService
 {
-    public const MAX_CONTEXT_SIZE_BYTES = 10 * 1024;
+    public const MAX_CONTEXT_SIZE_BYTES = 32 * 1024;
 
-    private ?array $context;
+    private array $context;
 
     public function __construct(private readonly int $chatSessionId)
     {
@@ -15,10 +15,6 @@ class ContextService
 
     public function findContext(int $chatSessionId): array
     {
-        if ($chatSessionId === null) {
-            dd('Chat session not found!');
-        }
-
         // Check if a sessions folder exists for this chat session, if not create one
         if (! is_dir(app_path('Ai/Sessions/'.$this->chatSessionId))) {
             mkdir(app_path('Ai/Sessions/'.$this->chatSessionId), 0755, true);
@@ -48,45 +44,48 @@ class ContextService
 
     public function upsertInContext(string $key, mixed $value): void
     {
-        if ($this->context === null) {
-            dd('Context not found!');
-        }
-
-        $this->context[$key] = $value;
-
-        $this->persistContext();
+        $this->set($key, $value);
     }
 
     public function addToContext(string $key, mixed $value): void
     {
-        if ($this->context === null) {
-            dd('Context not found!');
-        }
-
-        if (! isset($this->context[$key]) || ! is_array($this->context[$key])) {
-            $this->context[$key] = [];
-        }
-
-        $this->context[$key][] = $value;
-
-        $this->persistContext();
+        $this->push($key, $value);
     }
 
     public function getFromContext(string $key): mixed
     {
-        if ($this->context === null) {
-            dd('Context not found!');
+        return $this->get($key);
+    }
+
+    public function set(string $key, mixed $value): void
+    {
+        data_set($this->context, $key, $value);
+
+        $this->persistContext();
+    }
+
+    public function push(string $key, mixed $value): void
+    {
+        $items = data_get($this->context, $key, []);
+
+        if (! is_array($items)) {
+            $items = [];
         }
 
-        return $this->context[$key] ?? null;
+        $items[] = $value;
+
+        data_set($this->context, $key, $items);
+
+        $this->persistContext();
+    }
+
+    public function get(string $key, mixed $default = null): mixed
+    {
+        return data_get($this->context, $key, $default);
     }
 
     public function condenseContext(): void
     {
-        if ($this->context === null) {
-            dd('Context not found!');
-        }
-
         // For now we just return the context as is, but in the future we could add some logic here to condense the context down to the most important details to keep it within token limits for the LLM.
         $condensedContext = $this->context;
         // //
@@ -104,27 +103,15 @@ class ContextService
 
     public function getContextFilePath(): string
     {
-        if ($this->chatSessionId === null) {
-            dd('Chat session ID not found!');
-        }
-
         return app_path("Ai/Sessions/{$this->chatSessionId}/context.json");
     }
 
     private function persistContext(): void
     {
-        if ($this->context === null) {
-            dd('Context not found!');
-        }
-
-        if ($this->chatSessionId === null) {
-            dd('Chat session ID not found!');
-        }
-
         file_put_contents(app_path("Ai/Sessions/{$this->chatSessionId}/context.json"), json_encode($this->context));
     }
 
-    public function getContext(): ?array
+    public function getContext(): array
     {
         return $this->context;
     }

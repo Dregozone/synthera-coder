@@ -126,6 +126,17 @@ return [
             'url' => env('OPENAI_URL', 'https://api.openai.com/v1'),
         ],
 
+        'lmstudio' => [
+            'driver' => 'openai',
+            'key' => env('LM_STUDIO_API_KEY', 'lm-studio'),
+            'url' => env('LM_STUDIO_URL', 'http://127.0.0.1:1234/v1'),
+            'models' => [
+                'text' => [
+                    'default' => 'qwen/qwen3.5-9b',
+                ],
+            ],
+        ],
+
         'openrouter' => [
             'driver' => 'openrouter',
             'key' => env('OPENROUTER_API_KEY'),
