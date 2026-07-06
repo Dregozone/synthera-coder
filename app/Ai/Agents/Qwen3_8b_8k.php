@@ -15,7 +15,8 @@ use Stringable;
 
 #[Provider('lmstudio')]
 // #[Model('qwen/qwen3.5-9b')]
-#[Model('qwen2.5-coder-1.5b-instruct')]
+// #[Model('qwen2.5-coder-1.5b-instruct')]
+#[Model('qwen3.5-4b')]
 #[Timeout(300)]
 class Qwen3_8b_8k implements Agent, Conversational, HasTools
 {
