@@ -21,7 +21,7 @@ class ReadFile implements Tool
      */
     public function description(): Stringable|string
     {
-        return 'Check whether a file exists and read its contents. Provide a path relative to the working directory.';
+        return 'Read a file (path relative to the project root).';
     }
 
     /**

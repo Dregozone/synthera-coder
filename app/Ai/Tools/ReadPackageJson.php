@@ -18,7 +18,7 @@ class ReadPackageJson implements Tool
 
     public function description(): Stringable|string
     {
-        return 'Read the project package.json. Optionally pass a package name to return just its installed version constraint; otherwise returns dependencies, devDependencies, and scripts.';
+        return 'Read package.json (optionally one package name for just its version).';
     }
 
     public function handle(Request $request): Stringable|string

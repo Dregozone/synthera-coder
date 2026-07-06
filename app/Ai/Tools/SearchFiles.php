@@ -26,7 +26,7 @@ class SearchFiles implements Tool
 
     public function description(): Stringable|string
     {
-        return 'Search the project files for a plain-text substring (case-insensitive) and return matching lines as "path:line: text". Skips vendor and node_modules.';
+        return 'Search project files for a text substring; returns "path:line: text".';
     }
 
     public function handle(Request $request): Stringable|string

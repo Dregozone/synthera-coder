@@ -22,7 +22,7 @@ class RunCommand implements Tool
 
     public function description(): Stringable|string
     {
-        return 'Propose a shell command to run in the project working directory (e.g. "php artisan test"). The command is shown to the user and only executed after they approve it.';
+        return 'Propose a shell command to run in the project (e.g. "php artisan test"); the user approves before it runs.';
     }
 
     public function handle(Request $request): Stringable|string

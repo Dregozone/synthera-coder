@@ -25,7 +25,7 @@ class WriteFile implements Tool
 
     public function description(): Stringable|string
     {
-        return 'Propose creating or overwriting a file with the given contents (path relative to the working directory). The change is shown to the user as a diff and only applied after they approve it.';
+        return 'Propose creating/overwriting a file with full new contents (user approves the diff before it applies).';
     }
 
     public function handle(Request $request): Stringable|string

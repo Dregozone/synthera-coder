@@ -21,7 +21,7 @@ class FindComposerVersion implements Tool
      */
     public function description(): Stringable|string
     {
-        return 'Find the installed version of a Composer package in the project (reads composer.lock).';
+        return 'Get an installed Composer package version (from composer.lock).';
     }
 
     /**

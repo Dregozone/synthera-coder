@@ -29,7 +29,7 @@ test('tool service exposes tool definitions for agent prompts', function (): voi
 
     expect($readFileDefinition)->not->toBeNull();
     expect($readFileDefinition['name'])->toBe('ReadFile');
-    expect($readFileDefinition['description'])->toBe('Check whether a file exists and read its contents. Provide a path relative to the working directory.');
+    expect($readFileDefinition['description'])->toBe('Read a file (path relative to the project root).');
     expect($readFileDefinition['tool'])->toBeInstanceOf(ReadFile::class);
 });
 

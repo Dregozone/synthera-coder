@@ -18,7 +18,7 @@ class ListDirectory implements Tool
 
     public function description(): Stringable|string
     {
-        return 'List the files and sub-directories directly inside a directory (relative to the working directory). Use "." for the project root.';
+        return 'List files and folders in a directory (use "." for the project root).';
     }
 
     public function handle(Request $request): Stringable|string
