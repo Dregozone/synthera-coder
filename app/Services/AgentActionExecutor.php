@@ -72,11 +72,13 @@ class AgentActionExecutor
         }
 
         $process = Process::fromShellCommandline((string) $action->payload['command'], $cwd);
-        $process->setTimeout(180);
+        $process->setTimeout(300);
         $process->run();
 
-        $output = trim($process->getOutput());
-        $error = trim($process->getErrorOutput());
+        // Strip ANSI colour codes so results are clean for both the UI and the
+        // model that receives them as feedback.
+        $output = trim(preg_replace('/\e\[[0-9;]*m/', '', $process->getOutput()) ?? '');
+        $error = trim(preg_replace('/\e\[[0-9;]*m/', '', $process->getErrorOutput()) ?? '');
 
         $result = "Exit code: {$process->getExitCode()}";
 
