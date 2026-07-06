@@ -132,7 +132,7 @@ return [
             'url' => env('LM_STUDIO_URL', 'http://127.0.0.1:1234/v1'),
             'models' => [
                 'text' => [
-                    'default' => 'qwen/qwen3.5-9b',
+                    'default' => env('LM_STUDIO_MODEL', 'qwen/qwen3.5-9b'),
                 ],
             ],
         ],

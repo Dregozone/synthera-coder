@@ -5,6 +5,14 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+/**
+ * @property int $id
+ * @property string|null $title
+ * @property int|null $number_of_messages
+ * @property string|null $current_model
+ * @property string|null $current_chat_type
+ * @property string|null $current_working_directory
+ */
 class ChatSession extends Model
 {
     protected $fillable = [

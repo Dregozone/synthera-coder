@@ -2,7 +2,7 @@
 
 namespace App\Ai\Tools;
 
-use App\Models\ChatSession;
+use App\Ai\Tools\Concerns\ResolvesSessionContext;
 use App\Services\FileService;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\Support\Facades\File;
@@ -12,12 +12,16 @@ use Stringable;
 
 class ReadFile implements Tool
 {
+    use ResolvesSessionContext;
+
+    public function __construct(protected ?int $chatSessionId = null) {}
+
     /**
      * Get the description of the tool's purpose.
      */
     public function description(): Stringable|string
     {
-        return 'This tool can be used to check if a file exists or read the contents of a file.';
+        return 'Check whether a file exists and read its contents. Provide a path relative to the working directory.';
     }
 
     /**
@@ -25,15 +29,13 @@ class ReadFile implements Tool
      */
     public function handle(Request $request): Stringable|string
     {
-        $fileService = new FileService;
-
-        $filePath = $fileService->resolveFilePath(
+        $filePath = (new FileService)->resolveFilePath(
             filePath: (string) $request['value'],
-            currentWorkingDirectory: ChatSession::query()->latest('updated_at')->value('current_working_directory'),
+            currentWorkingDirectory: $this->workingDirectory(),
         );
 
         if ($filePath === null) {
-            return 'No working directory is set for relative file paths.';
+            return 'Path is outside the working directory, or no working directory is set.';
         }
 
         if (! File::exists($filePath)) {

@@ -1,13 +1,15 @@
 <?php
 
+use App\Jobs\RunAgentTurn;
+use App\Models\AgentAction;
 use App\Models\ChatMessage;
 use App\Models\ChatSession;
 use App\Services\ChatService;
 use App\Services\ContextService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
-use Mockery\MockInterface;
 
 use function Pest\Laravel\get;
 
@@ -61,22 +63,39 @@ test('working directory switch button closes the modal via flux alpine helper', 
     $response->assertSee('$flux.modal(\'change-directory\').close()', escape: false);
 });
 
-test('chat page includes bucketed thinking messages and resets the timer state', function (): void {
-    $session = ChatSession::create();
+test('the chat shows a working indicator and polls while awaiting a response', function (): void {
+    Queue::fake();
 
-    $response = get(route('home', ['sessionId' => $session->id]));
+    $session = ChatSession::create([
+        'current_working_directory' => base_path(),
+        'current_model' => 'qwen/qwen3.5-9b',
+        'current_chat_type' => 'agent',
+    ]);
 
-    $response->assertOk();
-    $response->assertSee('thinkingStageBuckets:', escape: false);
-    $response->assertSee('Warming up the gears...');
-    $response->assertSee('Preparing the brainwaves...');
-    $response->assertSee('Thinking harder...');
-    $response->assertSee('Going full detective mode...');
-    $response->assertSee('Reasoning at full tilt...');
-    $response->assertSee('this.selectedThinkingStages = this.pickThinkingStages()', escape: false);
-    $response->assertSee('this.selectedThinkingStages = []', escape: false);
-    $response->assertSee('this.thinkingStartedAt = Date.now()', escape: false);
-    $response->assertSee('window.clearInterval(this.thinkingMessageTimer)', escape: false);
+    Livewire::test('pages::chat', ['sessionId' => $session->id])
+        ->set('prompt', 'Do something')
+        ->call('sendMessage')
+        ->assertSet('awaitingResponse', true)
+        ->assertSee('Working locally')
+        ->assertSee('wire:poll.2s', escape: false);
+});
+
+test('deleting a session removes it with its messages and redirects home', function (): void {
+    $session = ChatSession::create(['current_working_directory' => base_path()]);
+
+    ChatMessage::create([
+        'chat_session_id' => $session->id,
+        'type' => 'agent',
+        'by' => 'user',
+        'content' => 'A message',
+    ]);
+
+    Livewire::test('pages::chat', ['sessionId' => $session->id])
+        ->call('deleteSession')
+        ->assertRedirect(route('home'));
+
+    expect(ChatSession::find($session->id))->toBeNull()
+        ->and(ChatMessage::where('chat_session_id', $session->id)->exists())->toBeFalse();
 });
 
 test('adding a message increments the cached session counters', function (): void {
@@ -100,143 +119,142 @@ test('adding a message increments the cached session counters', function (): voi
     expect($session->updated_at->greaterThan($originalUpdatedAt))->toBeTrue();
 });
 
-test('sending a message stores the current request in the context file', function (): void {
+test('sending a message stores the user message and dispatches an agent turn', function (): void {
+    Queue::fake();
+
     $session = ChatSession::create([
-        'current_model' => 'qwen3:8b-8k',
-        'current_chat_type' => 'chat',
+        'current_model' => 'qwen/qwen3.5-9b',
+        'current_chat_type' => 'agent',
         'current_working_directory' => base_path(),
     ]);
 
-    File::deleteDirectory(app_path("Ai/Sessions/{$session->id}"));
-
     Livewire::test('pages::chat', ['sessionId' => $session->id])
-        ->set('originalPrompt', 'Capture this request in the context file')
+        ->set('prompt', 'Add a hello page')
         ->call('sendMessage')
-        ->assertSet('tasks', [])
-        ->assertSet('taskResults', [])
-        ->assertSet('taskStatuses', [])
-        ->assertSet('toolResults', []);
+        ->assertSet('prompt', '')
+        ->assertSet('awaitingResponse', true);
 
-    $contextService = new ContextService($session->id);
+    expect(ChatMessage::query()
+        ->where('chat_session_id', $session->id)
+        ->where('by', 'user')
+        ->where('content', 'Add a hello page')
+        ->exists())->toBeTrue();
 
-    expect($contextService->get('current_request_index'))->toBe(0)
-        ->and($contextService->get('requests.0.original_message'))->toBe('Capture this request in the context file')
-        ->and($contextService->get('requests.0.agent'))->toBe('qwen3:8b-8k')
-        ->and($contextService->get('requests.0.message_type'))->toBe('chat')
-        ->and($contextService->get('requests.0.working_directory'))->toBe(base_path())
-        ->and($contextService->get('requests.0.tasks'))->toBe([]);
+    Queue::assertPushed(
+        RunAgentTurn::class,
+        fn (RunAgentTurn $job): bool => $job->sessionId === $session->id && $job->kind === 'user',
+    );
 });
 
-test('chat page hydrates workflow state from the current request context file', function (): void {
+test('sending a message without a working directory is rejected before dispatch', function (): void {
+    Queue::fake();
+
+    $session = ChatSession::create(['current_model' => 'qwen/qwen3.5-9b']);
+
+    Livewire::test('pages::chat', ['sessionId' => $session->id])
+        ->set('prompt', 'Add a hello page')
+        ->call('sendMessage')
+        ->assertSet('awaitingResponse', false);
+
+    Queue::assertNothingPushed();
+
+    expect(ChatMessage::query()->where('chat_session_id', $session->id)->exists())->toBeFalse();
+});
+
+test('approving a proposed write applies it and queues a continuation turn', function (): void {
+    Queue::fake();
+
+    $dir = sys_get_temp_dir().DIRECTORY_SEPARATOR.'synthera-'.uniqid();
+    File::makeDirectory($dir, 0755, true);
+
     $session = ChatSession::create([
-        'current_model' => 'qwen3:8b-8k',
-        'current_chat_type' => 'chat',
+        'current_working_directory' => $dir,
+        'current_model' => 'qwen/qwen3.5-9b',
+        'current_chat_type' => 'agent',
     ]);
 
     File::deleteDirectory(app_path("Ai/Sessions/{$session->id}"));
 
-    $contextService = new ContextService($session->id);
-    $contextService->set('requests', [[
-        'original_message' => 'Inspect the composer constraints',
-        'agent' => 'qwen3:8b-8k',
-        'message_type' => 'chat',
-        'working_directory' => base_path(),
-        'tasks' => [
-            [
-                'number' => 1,
-                'content' => 'Read composer.json',
-                'status' => 'Done',
-                'tool_calls' => [],
-                'tool_results' => [[
-                    'tool' => 'ReadFile',
-                    'input' => 'composer.json',
-                    'output' => '{}',
-                ]],
-                'summary' => 'Read composer file',
-                'response' => 'Composer file reviewed',
-            ],
-            [
-                'number' => 2,
-                'content' => 'Summarize the findings',
-                'status' => 'Pending',
-                'tool_calls' => [],
-                'tool_results' => [],
-                'summary' => null,
-                'response' => null,
-            ],
-        ],
-        'final_response' => null,
-        'created_at' => now()->toIso8601String(),
-        'updated_at' => now()->toIso8601String(),
-    ]]);
-    $contextService->set('current_request_index', 0);
+    $action = AgentAction::create([
+        'chat_session_id' => $session->id,
+        'type' => AgentAction::TYPE_WRITE,
+        'status' => AgentAction::STATUS_PENDING,
+        'payload' => ['path' => 'notes.txt', 'contents' => 'hello world'],
+    ]);
 
     Livewire::test('pages::chat', ['sessionId' => $session->id])
-        // Tasks are displayed from the 0-based request task list, while status/result maps stay keyed by 1-based task number.
-        ->assertSet('originalPrompt', 'Inspect the composer constraints')
-        ->assertSet('tasks.0', 'Read composer.json')
-        ->assertSet('taskStatuses.1', 'Done')
-        ->assertSet('toolResults.1.0.tool', 'ReadFile')
-        ->assertSet('taskResults.1', 'Composer file reviewed');
+        ->call('approveAction', $action->id);
+
+    expect(File::get($dir.DIRECTORY_SEPARATOR.'notes.txt'))->toBe('hello world')
+        ->and($action->fresh()->status)->toBe(AgentAction::STATUS_EXECUTED);
+
+    Queue::assertPushed(
+        RunAgentTurn::class,
+        fn (RunAgentTurn $job): bool => $job->kind === 'continue',
+    );
+
+    File::deleteDirectory($dir);
 });
 
-test('assistant response reads task results from context and stores the final response', function (): void {
+test('the automatic follow-up loop stops after the continuation limit is reached', function (): void {
+    Queue::fake();
+
     $session = ChatSession::create([
-        'current_model' => 'qwen3:8b-8k',
-        'current_chat_type' => 'chat',
+        'current_working_directory' => base_path(),
+        'current_model' => 'qwen/qwen3.5-9b',
+        'current_chat_type' => 'agent',
     ]);
 
     File::deleteDirectory(app_path("Ai/Sessions/{$session->id}"));
 
-    $contextService = new ContextService($session->id);
-    $contextService->set('requests', [[
-        'original_message' => 'Original prompt from context',
-        'agent' => 'qwen3:8b-8k',
-        'message_type' => 'chat',
-        'working_directory' => base_path(),
-        'tasks' => [
-            [
-                'number' => 1,
-                'content' => 'Inspect the file',
-                'status' => 'Done',
-                'tool_calls' => [],
-                'tool_results' => [[
-                    'tool' => 'ReadFile',
-                    'input' => 'composer.json',
-                    'output' => '{}',
-                ]],
-                'summary' => 'Inspected file',
-                'response' => 'Task response from context',
-            ],
-        ],
-        'final_response' => null,
-        'created_at' => now()->toIso8601String(),
-        'updated_at' => now()->toIso8601String(),
-    ]]);
-    $contextService->set('current_request_index', 0);
+    // Simulate having already used the full budget of automatic follow-ups.
+    (new ContextService($session->id))->set('continuation_rounds', 6);
 
-    $this->mock(ChatService::class, function (MockInterface $mock) use ($session): void {
-        $mock->shouldReceive('maintenanceTasks')->zeroOrMoreTimes();
-        $mock->shouldReceive('findAssistantResponse')
-            ->once()
-            ->withArgs(function (int $sessionId, string $type, string $model, string $message, string $originalPrompt, array $taskResults) use ($session): bool {
-                expect($sessionId)->toBe($session->id);
-                expect($type)->toBe('chat');
-                expect($model)->toBe('qwen3:8b-8k');
-                expect($message)->toBe('Original prompt from context');
-                expect($originalPrompt)->toBe('Original prompt from context');
-                expect($taskResults)->toBe([1 => 'Task response from context']);
-
-                return true;
-            })
-            ->andReturn('Final answer from context');
-    });
+    $action = AgentAction::create([
+        'chat_session_id' => $session->id,
+        'type' => AgentAction::TYPE_COMMAND,
+        'status' => AgentAction::STATUS_PENDING,
+        'payload' => ['command' => 'php artisan test', 'cwd' => base_path()],
+    ]);
 
     Livewire::test('pages::chat', ['sessionId' => $session->id])
-        ->call('findAssistantResponse');
+        ->call('rejectAction', $action->id);
 
-    expect((new ContextService($session->id))->get('requests.0.final_response.content'))
-        ->toBe('Final answer from context');
+    Queue::assertNotPushed(RunAgentTurn::class);
+
+    expect(ChatMessage::query()
+        ->where('chat_session_id', $session->id)
+        ->where('content', 'like', 'Reached the automatic follow-up limit%')
+        ->exists())->toBeTrue();
+});
+
+test('rejecting a proposed action marks it rejected and queues a continuation turn', function (): void {
+    Queue::fake();
+
+    $session = ChatSession::create([
+        'current_working_directory' => base_path(),
+        'current_model' => 'qwen/qwen3.5-9b',
+        'current_chat_type' => 'agent',
+    ]);
+
+    File::deleteDirectory(app_path("Ai/Sessions/{$session->id}"));
+
+    $action = AgentAction::create([
+        'chat_session_id' => $session->id,
+        'type' => AgentAction::TYPE_COMMAND,
+        'status' => AgentAction::STATUS_PENDING,
+        'payload' => ['command' => 'php artisan migrate', 'cwd' => base_path()],
+    ]);
+
+    Livewire::test('pages::chat', ['sessionId' => $session->id])
+        ->call('rejectAction', $action->id);
+
+    expect($action->fresh()->status)->toBe(AgentAction::STATUS_REJECTED);
+
+    Queue::assertPushed(
+        RunAgentTurn::class,
+        fn (RunAgentTurn $job): bool => $job->kind === 'continue',
+    );
 });
 
 test('adding a message stores chat history in the context file', function (): void {

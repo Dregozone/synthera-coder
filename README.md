@@ -1,8 +1,10 @@
 # Synthera Coder
 
-> A local-first, agentic AI coding assistant built with Laravel, Livewire, and Ollama — designed to sit alongside your projects and help you think, plan, and build.
+> A local-first, agentic AI coding assistant built with Laravel, Livewire, and local LLMs (LM Studio or Ollama) — designed to sit alongside your projects and help you think, plan, and build.
 
 Synthera Coder is a self-hosted web application that runs as a **sibling directory** to your other projects. Point it at any project on your machine and start a conversation: it will break down your request into a concise task list, run the relevant tools to gather context (reading files, checking package versions, etc.), work through each task using a local LLM, then synthesise a final response — all streamed back to a clean chat UI without sending a single line of your code to a third-party API.
+
+> **Primary runtime: LM Studio.** The app ships configured for LM Studio's OpenAI-compatible server (`config/ai.php` → `lmstudio` provider). The model is set via the `LM_STUDIO_MODEL` environment variable and must match the identifier LM Studio reports for the model you have loaded. Ollama remains fully supported as an alternative provider.
 
 ---
 

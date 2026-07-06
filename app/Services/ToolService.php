@@ -81,7 +81,7 @@ class ToolService
 
         $agent = $chatService->findAgent($model, $sessionId);
 
-        if ($agent == '') {
+        if ($agent === null) {
             return [];
         }
 
@@ -108,7 +108,7 @@ class ToolService
         ';
 
         $response = $agent
-            ->prompt($instructions);
+            ->ask($instructions);
 
         $toolResults = [];
         foreach ($toolDefinitions as $toolDefinition) {

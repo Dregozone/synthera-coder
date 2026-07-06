@@ -2,7 +2,7 @@
 
 namespace App\Services;
 
-use App\Ai\Agents\Qwen3_8b_8k;
+use App\Ai\Agents\LocalAgent;
 use App\Models\ChatMessage;
 use App\Models\ChatSession;
 use Illuminate\Support\Facades\DB;
@@ -11,11 +11,18 @@ class ChatService
 {
     public static function nextSessionId(): int
     {
-        // Make a new session that can be used
-        $model = ChatSession::create([]);
+        // Reuse the most recent empty session (if any) rather than piling up a new
+        // empty row on every fresh page load or "new chat" click.
+        $existingEmptySessionId = ChatSession::query()
+            ->where('number_of_messages', 0)
+            ->latest('id')
+            ->value('id');
 
-        // Grab the ID of the newly created ChatSession
-        return $model->id;
+        if ($existingEmptySessionId !== null) {
+            return (int) $existingEmptySessionId;
+        }
+
+        return (int) ChatSession::create([])->id;
     }
 
     public function maintenanceTasks(): void
@@ -64,7 +71,7 @@ class ChatService
 
         $agent = $this->findAgent($model, $sessionId);
 
-        if ($agent == '') {
+        if ($agent === null) {
             return ['No agent found'];
         }
 
@@ -82,7 +89,7 @@ class ChatService
         ';
 
         $response = $agent
-            ->prompt($instructions.$message);
+            ->ask($instructions.$message);
 
         $tasksArr = array_values(array_filter(
             array_map(trim(...), explode('|', $response->text)),
@@ -101,7 +108,7 @@ class ChatService
         ';
 
         $refinedResponse = $agent
-            ->prompt($refiningInstructions);
+            ->ask($refiningInstructions);
 
         $refinedTasksArr = array_values(array_filter(
             array_map(trim(...), explode('|', $refinedResponse->text)),
@@ -146,7 +153,7 @@ class ChatService
 
         $agent = $this->findAgent($model, $sessionId);
 
-        if ($agent == '') {
+        if ($agent === null) {
             return [
                 'response' => '',
                 'summary' => '',
@@ -165,7 +172,7 @@ class ChatService
         ';
 
         $response = $agent
-            ->prompt($instructions);
+            ->ask($instructions);
 
         // Find a short summary of what this task has achieved
         $summaryInstructions = '
@@ -175,7 +182,7 @@ class ChatService
         ';
 
         $summaryResponse = $agent
-            ->prompt($summaryInstructions.$response->text);
+            ->ask($summaryInstructions.$response->text);
 
         // Log the response from the agent after working on the task
         $this->addMessage(
@@ -202,7 +209,7 @@ class ChatService
 
         $agent = $this->findAgent($model, $sessionId);
 
-        if ($agent == '') {
+        if ($agent === null) {
             return 'Unknown agent';
         }
 
@@ -214,7 +221,7 @@ class ChatService
         ';
 
         $response = $agent
-            ->prompt($instructions.$message);
+            ->ask($instructions.$message);
 
         $title = $response->text;
 
@@ -233,7 +240,7 @@ class ChatService
 
         $agent = $this->findAgent($model, $sessionId);
 
-        if ($agent == '') {
+        if ($agent === null) {
             return '';
         }
 
@@ -246,7 +253,7 @@ class ChatService
 
         // Process the users message
         $response = $agent
-            ->prompt($instructions.$originalPrompt);
+            ->ask($instructions.$originalPrompt);
 
         $this->addMessage(
             sessionId: $sessionId,
@@ -263,7 +270,7 @@ class ChatService
         string $type,
         string $by,
         string $content,
-    ): void {
+    ): int {
         $chatMessage = ChatMessage::create([
             'chat_session_id' => $sessionId,
             'type' => $type,
@@ -286,6 +293,8 @@ class ChatService
             'content' => $content,
             'created_at' => $chatMessage->created_at?->toIso8601String(),
         ]);
+
+        return $chatMessage->id;
     }
 
     public function getMessagesForSession(int $sessionId): array
@@ -298,22 +307,18 @@ class ChatService
             ->toArray();
     }
 
-    public function findAgent(string $model, int $sessionId): Qwen3_8b_8k|string
+    /**
+     * Resolve a configured local agent for the given model label, or null when
+     * the label is not present in the `synthera-coder.models` configuration.
+     */
+    public function findAgent(string $model, int $sessionId): ?LocalAgent
     {
-        if (in_array($model, ['qwen/qwen3.5-9b', 'qwen3.5-9b', 'qwen3:8b-8k'], true)) {
-            return new Qwen3_8b_8k;
+        // Model labels contain dots (e.g. "qwen/qwen3.5-9b"), so avoid config()
+        // dot-notation and index the map directly.
+        $models = config('synthera-coder.models', []);
+        $config = $models[$model] ?? null;
 
-        } elseif ($model === 'qwen3:14b-16k') {
-            $this->addMessage(
-                sessionId: $sessionId,
-                type: 'info',
-                by: 'assistant',
-                content: '14b model still needs implementing...',
-            );
-
-            return '';
-
-        } else {
+        if (! is_array($config)) {
             $this->addMessage(
                 sessionId: $sessionId,
                 type: 'info',
@@ -321,7 +326,13 @@ class ChatService
                 content: 'The specified model is not recognized...',
             );
 
-            return '';
+            return null;
         }
+
+        return new LocalAgent(
+            provider: (string) ($config['provider'] ?? 'lmstudio'),
+            model: (string) ($config['model'] ?? $model),
+            timeout: (int) ($config['timeout'] ?? 300),
+        );
     }
 }

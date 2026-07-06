@@ -2,7 +2,7 @@
 
 namespace App\Ai\Tools;
 
-use App\Models\ChatSession;
+use App\Ai\Tools\Concerns\ResolvesSessionContext;
 use App\Services\FileService;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\Support\Facades\File;
@@ -12,12 +12,16 @@ use Stringable;
 
 class FindComposerVersion implements Tool
 {
+    use ResolvesSessionContext;
+
+    public function __construct(protected ?int $chatSessionId = null) {}
+
     /**
      * Get the description of the tool's purpose.
      */
     public function description(): Stringable|string
     {
-        return 'This tool can be used to find the version of composer packages that are installed in the project.';
+        return 'Find the installed version of a Composer package in the project (reads composer.lock).';
     }
 
     /**
@@ -25,24 +29,20 @@ class FindComposerVersion implements Tool
      */
     public function handle(Request $request): Stringable|string
     {
-        $fileService = new FileService;
-
-        $filePath = $fileService->resolveFilePath(
+        $filePath = (new FileService)->resolveFilePath(
             filePath: 'composer.lock',
-            currentWorkingDirectory: ChatSession::query()->latest('updated_at')->value('current_working_directory'),
+            currentWorkingDirectory: $this->workingDirectory(),
         );
 
         if ($filePath === null) {
-            return 'No working directory is set for relative file paths.';
+            return 'Path is outside the working directory, or no working directory is set.';
         }
 
         if (! File::exists($filePath)) {
             return "File not found: $filePath";
         }
 
-        $contents = File::get($filePath);
-
-        $contentsArr = json_decode($contents, true);
+        $contentsArr = json_decode(File::get($filePath), true);
 
         if (! isset($contentsArr['packages']) || ! is_array($contentsArr['packages'])) {
             return 'No packages found in composer.lock';

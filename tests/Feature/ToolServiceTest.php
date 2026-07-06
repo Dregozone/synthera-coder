@@ -29,7 +29,7 @@ test('tool service exposes tool definitions for agent prompts', function (): voi
 
     expect($readFileDefinition)->not->toBeNull();
     expect($readFileDefinition['name'])->toBe('ReadFile');
-    expect($readFileDefinition['description'])->toBe('This tool can be used to check if a file exists or read the contents of a file.');
+    expect($readFileDefinition['description'])->toBe('Check whether a file exists and read its contents. Provide a path relative to the working directory.');
     expect($readFileDefinition['tool'])->toBeInstanceOf(ReadFile::class);
 });
 
@@ -45,9 +45,9 @@ test('read file tool reads relative paths from the latest session working direct
     expect($contents)->toBe(File::get(base_path('composer.json')));
 });
 
-test('read file tool preserves absolute paths', function (): void {
+test('read file tool preserves absolute paths inside the working directory', function (): void {
     ChatSession::create([
-        'current_working_directory' => app_path(),
+        'current_working_directory' => base_path(),
     ]);
 
     $absolutePath = base_path('composer.json');
@@ -57,4 +57,23 @@ test('read file tool preserves absolute paths', function (): void {
     ]));
 
     expect($contents)->toBe(File::get($absolutePath));
+});
+
+test('read file tool rejects paths that escape the working directory', function (): void {
+    ChatSession::create([
+        'current_working_directory' => app_path(),
+    ]);
+
+    // Absolute path pointing outside the working directory (its parent).
+    $escapingAbsolute = (new ReadFile)->handle(new Request([
+        'value' => base_path('composer.json'),
+    ]));
+
+    // Relative traversal attempting to climb out of the working directory.
+    $escapingRelative = (new ReadFile)->handle(new Request([
+        'value' => '../composer.json',
+    ]));
+
+    expect((string) $escapingAbsolute)->toBe('Path is outside the working directory, or no working directory is set.')
+        ->and((string) $escapingRelative)->toBe('Path is outside the working directory, or no working directory is set.');
 });

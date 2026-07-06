@@ -26,18 +26,20 @@ class ContextService
         }
 
         // Retrieve the context for this session from the context file
-        $this->context = json_decode(
+        $decoded = json_decode(
             file_get_contents(
                 app_path("Ai/Sessions/{$this->chatSessionId}/context.json")
             ), true
         );
 
-        if ($this->context === null) {
-            // Delete the existing context file and try again
+        if (! is_array($decoded)) {
+            // The context file is corrupt or empty; reset it and try again.
             unlink(app_path("Ai/Sessions/{$this->chatSessionId}/context.json"));
 
-            $this->findContext($chatSessionId);
+            return $this->findContext($chatSessionId);
         }
+
+        $this->context = $decoded;
 
         return $this->context;
     }
@@ -82,16 +84,6 @@ class ContextService
     public function get(string $key, mixed $default = null): mixed
     {
         return data_get($this->context, $key, $default);
-    }
-
-    public function condenseContext(): void
-    {
-        // For now we just return the context as is, but in the future we could add some logic here to condense the context down to the most important details to keep it within token limits for the LLM.
-        $condensedContext = $this->context;
-        // //
-        $this->context = $condensedContext;
-
-        $this->persistContext();
     }
 
     public function clearContext(): void
