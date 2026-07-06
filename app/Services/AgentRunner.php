@@ -64,6 +64,9 @@ class AgentRunner
 
     private function runTurn(int $sessionId, string $prompt, ?int $historyBeforeId, ?string $assignTitleFrom): void
     {
+        // Local models can be slow; never let PHP's time limit abort a turn.
+        set_time_limit(0);
+
         $session = ChatSession::find($sessionId);
 
         if ($session === null) {
@@ -83,13 +86,15 @@ class AgentRunner
 
         [$provider, $model, $timeout] = $this->resolveModel($session);
 
+        $mode = $session->current_chat_type ?: 'agent';
+
         $agent = new LocalAgent(
             provider: $provider,
             model: $model,
             timeout: $timeout,
             systemInstructions: $this->systemPrompt($session),
             conversation: $this->history($sessionId, $historyBeforeId),
-            availableTools: $this->tools($sessionId),
+            availableTools: $this->toolsForMode($mode, $sessionId),
         );
 
         try {
@@ -138,21 +143,33 @@ class AgentRunner
         $mode = $session->current_chat_type ?: 'agent';
         $tree = $this->workingDirectorySummary($session->current_working_directory);
 
-        return <<<PROMPT
-        You are Synthera Coder, a careful coding agent working on a local project, most often a Laravel application.
+        $base = <<<PROMPT
+        You are Synthera Coder, a careful coding assistant working on a local project, most often a Laravel application.
 
-        Current mode: {$mode}.
         Working directory: {$session->current_working_directory}
-        Top-level contents:
-        {$tree}
-
-        How you work:
-        - Use the read-only tools (ReadFile, ListDirectory, SearchFiles, ReadPackageJson, FindComposerVersion) to inspect the project before proposing changes. These run immediately.
-        - To change a file, call WriteFile with the FULL new file contents. To run a shell command (such as "php artisan test" or "vendor/bin/pint"), call RunCommand.
-        - WriteFile and RunCommand do NOT take effect immediately: they record a proposal that the user must approve. After proposing, assume it will be applied and continue.
-        - Keep changes minimal and focused. Prefer the smallest set of edits that satisfies the request, and follow the conventions already present in the project.
-        - When you have proposed everything needed for this turn, stop and give a short summary of what you did and what you are proposing.
+        Top-level contents: {$tree}
         PROMPT;
+
+        $guidance = match ($mode) {
+            'ask' => <<<'PROMPT'
+
+            Mode: Ask. Answer the user's question directly and concisely. This is ordinary chat — for greetings or general questions, just reply. You do not have tools in this mode, so never claim to have inspected files.
+            PROMPT,
+            'plan' => <<<'PROMPT'
+
+            Mode: Plan. You have read-only tools (ReadFile, ListDirectory, SearchFiles, ReadPackageJson, FindComposerVersion). Use them only when they genuinely help you understand the project, then produce a clear, step-by-step plan. Do NOT modify files or run commands. Never call the same tool with the same arguments twice. If the message is a greeting or general question, just reply without using tools.
+            PROMPT,
+            default => <<<'PROMPT'
+
+            Mode: Agent. You can inspect and change the project.
+            - Read-only tools (ReadFile, ListDirectory, SearchFiles, ReadPackageJson, FindComposerVersion) run immediately.
+            - To change a file, call WriteFile with the FULL new file contents. To run a command (e.g. "php artisan test"), call RunCommand. These are proposals the user must approve — after proposing one, assume it will be applied and continue.
+            - Only use tools when they are actually needed. For a greeting or a simple question, just reply — do NOT call any tools. Never call the same tool with the same arguments twice.
+            - Keep changes minimal and follow the project's existing conventions. When finished, stop and give a short summary.
+            PROMPT,
+        };
+
+        return $base.$guidance;
     }
 
     private function workingDirectorySummary(?string $directory): string
@@ -167,7 +184,7 @@ class AgentRunner
         $files = collect(File::files($directory))
             ->map(fn ($file): string => $file->getFilename());
 
-        $entries = $directories->sort()->merge($files->sort())->take(40);
+        $entries = $directories->sort()->merge($files->sort())->take(25);
 
         return $entries->isEmpty() ? '(empty)' : $entries->implode(', ');
     }
@@ -183,11 +200,17 @@ class AgentRunner
     {
         $context = new ContextService($sessionId);
         $summary = (string) $context->get('conversation_summary', '');
-        $condensedAt = (int) $context->get('condensed_at_message_id', 0);
+
+        // Messages before the condense/clear cutoff are excluded from the model's
+        // working context.
+        $cutoff = max(
+            (int) $context->get('condensed_at_message_id', 0),
+            (int) $context->get('history_reset_at_message_id', 0),
+        );
 
         $messages = ChatMessage::query()
             ->where('chat_session_id', $sessionId)
-            ->when($condensedAt > 0, fn ($query) => $query->where('id', '>', $condensedAt))
+            ->when($cutoff > 0, fn ($query) => $query->where('id', '>', $cutoff))
             ->when($beforeId !== null, fn ($query) => $query->where('id', '<', $beforeId))
             ->orderByDesc('id')
             ->limit(self::HISTORY_LIMIT)
@@ -195,7 +218,9 @@ class AgentRunner
             ->reverse()
             ->map(fn (ChatMessage $message): Message => new Message(
                 $message->by === 'user' ? 'user' : 'assistant',
-                $message->type === 'info' ? '[system] '.$message->content : $message->content,
+                // Truncate long entries (e.g. captured command output) so a single
+                // message cannot dominate a small local context window.
+                Str::limit($message->type === 'info' ? '[system] '.$message->content : $message->content, 2000),
             ))
             ->values()
             ->all();
@@ -213,6 +238,8 @@ class AgentRunner
      */
     public function condense(int $sessionId): string
     {
+        set_time_limit(0);
+
         $session = ChatSession::find($sessionId);
 
         if ($session === null) {
@@ -254,9 +281,30 @@ class AgentRunner
     }
 
     /**
+     * Select the tools available for a chat mode. Ask mode is plain chat (no
+     * tools, so weak models don't spin in a tool loop for simple messages);
+     * Plan gets read-only tools; Agent gets everything including the mutating
+     * proposal tools.
+     *
      * @return array<int, object>
      */
-    private function tools(int $sessionId): array
+    private function toolsForMode(string $mode, int $sessionId): array
+    {
+        return match ($mode) {
+            'ask' => [],
+            'plan' => $this->readOnlyTools($sessionId),
+            default => [
+                ...$this->readOnlyTools($sessionId),
+                new WriteFile($sessionId),
+                new RunCommand($sessionId),
+            ],
+        };
+    }
+
+    /**
+     * @return array<int, object>
+     */
+    private function readOnlyTools(int $sessionId): array
     {
         return [
             new ReadFile($sessionId),
@@ -264,8 +312,6 @@ class AgentRunner
             new SearchFiles($sessionId),
             new ReadPackageJson($sessionId),
             new FindComposerVersion($sessionId),
-            new WriteFile($sessionId),
-            new RunCommand($sessionId),
         ];
     }
 

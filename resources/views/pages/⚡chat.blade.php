@@ -5,11 +5,13 @@ use App\Models\AgentAction;
 use App\Models\ChatMessage;
 use App\Models\ChatSession;
 use App\Services\AgentActionExecutor;
+use App\Services\AgentRunner;
 use App\Services\ChatService;
 use App\Services\ContextService;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Lottery;
+use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Attributes\Url;
@@ -67,6 +69,10 @@ new #[Title('Agentic Chat')] class extends Component
 
     // Reachability of the local model server: unknown | warm | reachable | offline.
     public string $modelStatus = 'unknown';
+
+    // Holds an agent turn that should run on the next request (inline mode), so
+    // the user's message renders immediately before the model is prompted.
+    public array $pendingTurn = [];
 
     #[Computed]
     public function messages(): Collection
@@ -178,12 +184,17 @@ new #[Title('Agentic Chat')] class extends Component
     private function estimateConversationTokens(): int
     {
         $context = $this->contextService();
-        $condensedAt = (int) $context->get('condensed_at_message_id', 0);
         $summary = (string) $context->get('conversation_summary', '');
+
+        // Only messages after the condense/clear cutoff are sent to the model.
+        $cutoff = max(
+            (int) $context->get('condensed_at_message_id', 0),
+            (int) $context->get('history_reset_at_message_id', 0),
+        );
 
         $characters = ChatMessage::query()
             ->where('chat_session_id', $this->sessionId)
-            ->when($condensedAt > 0, fn ($query) => $query->where('id', '>', $condensedAt))
+            ->when($cutoff > 0, fn ($query) => $query->where('id', '>', $cutoff))
             ->sum(DB::raw('LENGTH(content)'));
 
         return (int) ceil(((int) $characters + strlen($summary)) / 4);
@@ -240,6 +251,56 @@ new #[Title('Agentic Chat')] class extends Component
         }
     }
 
+    /**
+     * Kick off an agent turn. Inline mode (the default) runs it in a follow-up
+     * request triggered from the browser so the chat updates before the model
+     * is prompted; queued mode pushes it to a worker.
+     *
+     * @param  array{kind: string, userMessageId?: int, feedback?: string}  $payload
+     */
+    private function startTurn(array $payload): void
+    {
+        $this->beginAwaiting();
+
+        if (config('synthera-coder.run_turns_inline', true)) {
+            $this->pendingTurn = $payload;
+            $this->dispatch('process-agent-turn');
+
+            return;
+        }
+
+        RunAgentTurn::dispatch(
+            sessionId: $this->sessionId,
+            kind: $payload['kind'],
+            userMessageId: $payload['userMessageId'] ?? null,
+            feedback: $payload['feedback'] ?? null,
+        );
+    }
+
+    /**
+     * Runs the queued turn inline (invoked by the browser after the send/approve
+     * request has rendered). This is what keeps the app working under Herd with
+     * no separate queue worker.
+     */
+    public function processPendingTurn(AgentRunner $runner): void
+    {
+        $payload = $this->pendingTurn;
+        $this->pendingTurn = [];
+
+        if ($payload === []) {
+            return;
+        }
+
+        if (($payload['kind'] ?? null) === 'user' && isset($payload['userMessageId'])) {
+            $runner->runForUserMessage($this->sessionId, (int) $payload['userMessageId']);
+        } elseif (($payload['kind'] ?? null) === 'continue' && isset($payload['feedback'])) {
+            $runner->continueAfterActions($this->sessionId, (string) $payload['feedback']);
+        }
+
+        $this->loadSessionData();
+        $this->dispatch('scroll-to-bottom');
+    }
+
     public function loadOlderMessages(): void
     {
         $this->visibleMessageCount += self::MESSAGE_BATCH_SIZE;
@@ -273,13 +334,7 @@ new #[Title('Agentic Chat')] class extends Component
         // A fresh user request resets the automatic follow-up budget.
         $this->contextService()->set('continuation_rounds', 0);
 
-        $this->beginAwaiting();
-
-        RunAgentTurn::dispatch(
-            sessionId: $this->sessionId,
-            kind: 'user',
-            userMessageId: $userMessageId,
-        );
+        $this->startTurn(['kind' => 'user', 'userMessageId' => $userMessageId]);
 
         $this->loadSessionData();
         $this->dispatch('scroll-to-bottom');
@@ -415,13 +470,7 @@ new #[Title('Agentic Chat')] class extends Component
         $feedback = "The user reviewed the actions you proposed. Results:\n\n".$lines.
             "\n\nIf you changed any code, verify it by proposing to run the project's tests (for a Laravel project, 'php artisan test'). Then continue with the request or, if everything is done, give a final summary.";
 
-        $this->beginAwaiting();
-
-        RunAgentTurn::dispatch(
-            sessionId: $this->sessionId,
-            kind: 'continue',
-            feedback: $feedback,
-        );
+        $this->startTurn(['kind' => 'continue', 'feedback' => $feedback]);
     }
 
     public function saveSessionTitle(): void
@@ -480,31 +529,41 @@ new #[Title('Agentic Chat')] class extends Component
         }
 
         $process = Process::fromShellCommandline($command, $this->selectedProject);
-        $process->setTimeout(180);
+        $process->setTimeout(300);
         $process->run();
 
-        $successMsg = trim($process->getOutput());
-        $errorMsg = trim($process->getErrorOutput());
+        $output = trim($process->getOutput());
+        $error = trim($process->getErrorOutput());
+
+        // Many CLI tools (composer, npm, pest) write their human-readable
+        // report to stderr, so include it too. Strip ANSI colour codes so the
+        // output renders cleanly in the chat.
+        $body = trim(preg_replace('/\e\[[0-9;]*m/', '', $output."\n".$error) ?? '');
 
         $this->addMessage(
             type: 'info',
             by: 'user',
-            content: "Executed command: $command. Result: $successMsg $errorMsg",
+            content: "**Ran** `{$command}` (exit {$process->getExitCode()})\n\n```\n".
+                (Str::limit($body, 6000) ?: '(no output)')."\n```",
         );
 
         $this->dispatch('scroll-to-bottom');
     }
 
-    public function condenseContext(\App\Services\AgentRunner $runner): void
+    public function condenseContext(AgentRunner $runner): void
     {
+        $hasMessages = ChatMessage::query()->where('chat_session_id', $this->sessionId)->exists();
+
         $summary = $runner->condense($this->sessionId);
 
         $this->addMessage(
             type: 'info',
             by: 'assistant',
-            content: $summary !== ''
-                ? "**Context condensed.** Earlier messages will now be sent to the model as this summary:\n\n".$summary
-                : 'Nothing to condense yet.',
+            content: match (true) {
+                $summary !== '' => "**Context condensed.** Earlier messages will now be sent to the model as this summary:\n\n".$summary,
+                $hasMessages => 'Could not condense the context — is the model loaded and reachable in LM Studio?',
+                default => 'Nothing to condense yet.',
+            },
         );
 
         $this->dispatch('scroll-to-bottom');
@@ -513,9 +572,22 @@ new #[Title('Agentic Chat')] class extends Component
 
     public function clearContext(): void
     {
-        $this->contextService()->clearContext();
+        $maxId = (int) (ChatMessage::query()
+            ->where('chat_session_id', $this->sessionId)
+            ->max('id') ?? 0);
 
-        $this->addMessage(type: 'info', by: 'user', content: 'Context cleared.');
+        // Start the model's working context fresh from here without deleting the
+        // visible chat history.
+        $context = $this->contextService();
+        $context->set('conversation_summary', '');
+        $context->set('condensed_at_message_id', 0);
+        $context->set('history_reset_at_message_id', $maxId);
+
+        $this->addMessage(
+            type: 'info',
+            by: 'user',
+            content: 'Context cleared — the model will start fresh from here. Earlier messages stay visible above.',
+        );
 
         $this->dispatch('scroll-to-bottom');
         $this->loadSessionData();
@@ -579,6 +651,7 @@ new #[Title('Agentic Chat')] class extends Component
     id="container"
     class="w-full flex gap-4"
     @if ($this->agentIsWorking()) wire:poll.2s="poll" @endif
+    x-on:process-agent-turn.window="$wire.processPendingTurn()"
     x-on:scroll-to-bottom.window="$nextTick(() => { $refs.messages.scrollTop = $refs.messages.scrollHeight })"
 >
     {{-- Left side --}}
@@ -794,11 +867,24 @@ new #[Title('Agentic Chat')] class extends Component
                     </div>
                 </div>
 
-                <flux:subheading size="lg" class="mt-2">Maintenance:</flux:subheading>
+                <flux:subheading size="lg" class="mt-2">Composer:</flux:subheading>
                 <div class="flex flex-wrap items-center gap-2 mb-2">
-                    <flux:button size="sm" variant="outline" icon="shield-check" x-on:click="runCommand('composer audit')">Composer audit</flux:button>
-                    <flux:button size="sm" variant="outline" icon="shield-check" x-on:click="runCommand('npm audit')">npm audit</flux:button>
+                    <flux:button size="sm" variant="outline" icon="shield-check" x-on:click="runCommand('composer audit')">Audit</flux:button>
+                    {{-- Composer has no "audit fix"; updating to patched versions is the remediation. --}}
+                    <flux:button size="sm" variant="outline" icon="chevron-double-up" x-on:click="runCommand('composer update')">Update</flux:button>
+                </div>
+
+                <flux:subheading size="lg" class="mt-2">npm:</flux:subheading>
+                <div class="flex flex-wrap items-center gap-2 mb-2">
+                    <flux:button size="sm" variant="outline" icon="shield-check" x-on:click="runCommand('npm audit')">Audit</flux:button>
+                    <flux:button size="sm" variant="outline" icon="wrench" x-on:click="runCommand('npm audit fix')">Audit fix</flux:button>
+                    <flux:button size="sm" variant="outline" icon="chevron-double-up" x-on:click="runCommand('npm update')">Update</flux:button>
+                </div>
+
+                <flux:subheading size="lg" class="mt-2">Tests:</flux:subheading>
+                <div class="flex flex-wrap items-center gap-2 mb-2">
                     <flux:button size="sm" variant="outline" icon="beaker" x-on:click="runCommand('php artisan test')">Run tests</flux:button>
+                    <flux:button size="sm" variant="outline" icon="sparkles" x-on:click="runCommand('vendor/bin/pint')">Pint</flux:button>
                 </div>
 
                 <flux:subheading size="lg" class="mt-2">Git:</flux:subheading>

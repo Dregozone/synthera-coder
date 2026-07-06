@@ -18,7 +18,7 @@ use Stringable;
  * and tools are all injected at construction time so that models can be swapped
  * purely through configuration rather than a class-per-model.
  */
-#[MaxSteps(25)]
+#[MaxSteps(12)]
 class LocalAgent implements Agent, Conversational, HasTools
 {
     use Promptable;
