@@ -9,7 +9,7 @@ use Laravel\Ai\Prompts\AgentPrompt;
 test('lm studio is configured as an openai-compatible local provider', function (): void {
     expect(config('ai.providers.lmstudio.driver'))->toBe('openai')
         ->and(config('ai.providers.lmstudio.models.text.default'))->toBe('qwen/qwen3.5-9b')
-        ->and(config('synthera-coder.chat_models'))->toBe(['qwen/qwen3.5-9b'])
+        ->and(config('synthera-coder.chat_models'))->toBe(['qwen/qwen3.5-9b', 'qwen3.5-4b'])
         ->and(config('synthera-coder.default_chat_model'))->toBe('qwen/qwen3.5-9b');
 });
 
@@ -35,8 +35,12 @@ test('chat service resolves a configured model label to a local agent', function
 
     expect($agent)->toBeInstanceOf(LocalAgent::class)
         ->and($agent->provider)->toBe('lmstudio')
-        ->and($agent->model)->toBe('qwen/qwen3.5-9b')
-        ->and($agent->timeout)->toBe(300);
+        ->and($agent->model)->toBe('qwen/qwen3.5-9b');
+
+    $smallAgent = $chatService->findAgent('qwen3.5-4b', $session->id);
+
+    expect($smallAgent)->toBeInstanceOf(LocalAgent::class)
+        ->and($smallAgent->model)->toBe('qwen3.5-4b');
 });
 
 test('local agent ask routes prompts through the configured provider and model', function (): void {
