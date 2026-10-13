@@ -131,7 +131,7 @@ test('condensing stores a conversation summary and marks the condense point', fu
 
     [$session] = agentWorkspace();
 
-    File::deleteDirectory(app_path("Ai/Sessions/{$session->id}"));
+    File::deleteDirectory(ContextService::sessionDirectory($session->id));
 
     ChatMessage::create(['chat_session_id' => $session->id, 'type' => 'agent', 'by' => 'user', 'content' => 'Add a page']);
     $last = ChatMessage::create(['chat_session_id' => $session->id, 'type' => 'agent', 'by' => 'assistant', 'content' => 'Done, I proposed a file.']);

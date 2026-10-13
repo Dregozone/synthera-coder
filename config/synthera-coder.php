@@ -41,6 +41,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Session Context Storage
+    |--------------------------------------------------------------------------
+    |
+    | Directory holding each chat session's context file, stored as
+    | `{sessions_path}/{session id}/context.json`. Feature tests point this at
+    | a temporary directory so they never touch real session context.
+    |
+    */
+    'sessions_path' => env('SYNTHERA_SESSIONS_PATH', app_path('Ai/Sessions')),
+
+    /*
+    |--------------------------------------------------------------------------
     | Chat Models
     |--------------------------------------------------------------------------
     |

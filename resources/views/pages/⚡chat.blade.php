@@ -598,7 +598,7 @@ new #[Title('Agentic Chat')] class extends Component
         $deletedId = $this->sessionId;
 
         ChatSession::whereKey($deletedId)->delete();
-        \Illuminate\Support\Facades\File::deleteDirectory(app_path("Ai/Sessions/{$deletedId}"));
+        \Illuminate\Support\Facades\File::deleteDirectory(ContextService::sessionDirectory($deletedId));
 
         $this->redirect(route('home'));
     }

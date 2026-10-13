@@ -205,7 +205,7 @@ test('approving a proposed write applies it and triggers a continuation turn', f
         'current_chat_type' => 'agent',
     ]);
 
-    File::deleteDirectory(app_path("Ai/Sessions/{$session->id}"));
+    File::deleteDirectory(ContextService::sessionDirectory($session->id));
 
     $action = AgentAction::create([
         'chat_session_id' => $session->id,
@@ -232,7 +232,7 @@ test('the automatic follow-up loop stops after the continuation limit is reached
         'current_chat_type' => 'agent',
     ]);
 
-    File::deleteDirectory(app_path("Ai/Sessions/{$session->id}"));
+    File::deleteDirectory(ContextService::sessionDirectory($session->id));
 
     // Simulate having already used the full budget of automatic follow-ups.
     (new ContextService($session->id))->set('continuation_rounds', 6);
@@ -261,7 +261,7 @@ test('rejecting a proposed action marks it rejected and triggers a continuation 
         'current_chat_type' => 'agent',
     ]);
 
-    File::deleteDirectory(app_path("Ai/Sessions/{$session->id}"));
+    File::deleteDirectory(ContextService::sessionDirectory($session->id));
 
     $action = AgentAction::create([
         'chat_session_id' => $session->id,
@@ -281,7 +281,7 @@ test('rejecting a proposed action marks it rejected and triggers a continuation 
 test('adding a message stores chat history in the context file', function (): void {
     $session = ChatSession::create();
 
-    File::deleteDirectory(app_path("Ai/Sessions/{$session->id}"));
+    File::deleteDirectory(ContextService::sessionDirectory($session->id));
 
     app(ChatService::class)->addMessage(
         sessionId: $session->id,
@@ -295,4 +295,14 @@ test('adding a message stores chat history in the context file', function (): vo
     expect($contextService->get('chat_history.0.by'))->toBe('assistant')
         ->and($contextService->get('chat_history.0.type'))->toBe('chat')
         ->and($contextService->get('chat_history.0.content'))->toBe('Hello from the context history');
+});
+
+test('session context is written to an isolated directory during tests', function (): void {
+    $session = ChatSession::create();
+
+    $contextFilePath = (new ContextService($session->id))->getContextFilePath();
+
+    expect($contextFilePath)->toStartWith(config('synthera-coder.sessions_path'))
+        ->and($contextFilePath)->not->toStartWith(app_path('Ai/Sessions'))
+        ->and(File::exists($contextFilePath))->toBeTrue();
 });

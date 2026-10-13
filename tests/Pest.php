@@ -2,6 +2,7 @@
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /*
@@ -18,12 +19,10 @@ use Tests\TestCase;
 pest()->extend(TestCase::class)
     ->use(RefreshDatabase::class)
     ->beforeEach(function (): void {
-        $this->existingSessionContextDirectories = sessionContextDirectories();
+        config(['synthera-coder.sessions_path' => storage_path('framework/testing/sessions/'.Str::uuid())]);
     })
     ->afterEach(function (): void {
-        foreach (array_diff(sessionContextDirectories(), $this->existingSessionContextDirectories) as $directory) {
-            File::deleteDirectory($directory);
-        }
+        File::deleteDirectory(config('synthera-coder.sessions_path'));
     })
     ->in('Feature');
 
@@ -54,17 +53,4 @@ expect()->extend('toBeOne', fn () => $this->toBe(1));
 function something()
 {
     // ..
-}
-
-/**
- * The per-session context directories that currently exist under app/Ai/Sessions.
- *
- * Feature tests snapshot these before each test and remove only the ones the test created,
- * so session context written during tests never leaks into the working tree or wipes real data.
- *
- * @return list<string>
- */
-function sessionContextDirectories(): array
-{
-    return File::isDirectory(app_path('Ai/Sessions')) ? File::directories(app_path('Ai/Sessions')) : [];
 }

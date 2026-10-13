@@ -13,28 +13,34 @@ class ContextService
         $this->context = $this->findContext($this->chatSessionId);
     }
 
+    /**
+     * The directory holding the given chat session's context file.
+     */
+    public static function sessionDirectory(int $chatSessionId): string
+    {
+        return config('synthera-coder.sessions_path').'/'.$chatSessionId;
+    }
+
     public function findContext(int $chatSessionId): array
     {
         // Check if a sessions folder exists for this chat session, if not create one
-        if (! is_dir(app_path('Ai/Sessions/'.$this->chatSessionId))) {
-            mkdir(app_path('Ai/Sessions/'.$this->chatSessionId), 0755, true);
+        if (! is_dir(self::sessionDirectory($this->chatSessionId))) {
+            mkdir(self::sessionDirectory($this->chatSessionId), 0755, true);
         }
 
         // Check that a context file exists for this session, if not create one with an empty context
-        if (! file_exists(app_path('Ai/Sessions/'.$this->chatSessionId.'/context.json'))) {
-            file_put_contents(app_path('Ai/Sessions/'.$this->chatSessionId.'/context.json'), json_encode([]));
+        if (! file_exists($this->getContextFilePath())) {
+            file_put_contents($this->getContextFilePath(), json_encode([]));
         }
 
         // Retrieve the context for this session from the context file
         $decoded = json_decode(
-            file_get_contents(
-                app_path("Ai/Sessions/{$this->chatSessionId}/context.json")
-            ), true
+            file_get_contents($this->getContextFilePath()), true
         );
 
         if (! is_array($decoded)) {
             // The context file is corrupt or empty; reset it and try again.
-            unlink(app_path("Ai/Sessions/{$this->chatSessionId}/context.json"));
+            unlink($this->getContextFilePath());
 
             return $this->findContext($chatSessionId);
         }
@@ -95,12 +101,12 @@ class ContextService
 
     public function getContextFilePath(): string
     {
-        return app_path("Ai/Sessions/{$this->chatSessionId}/context.json");
+        return self::sessionDirectory($this->chatSessionId).'/context.json';
     }
 
     private function persistContext(): void
     {
-        file_put_contents(app_path("Ai/Sessions/{$this->chatSessionId}/context.json"), json_encode($this->context));
+        file_put_contents($this->getContextFilePath(), json_encode($this->context));
     }
 
     public function getContext(): array
