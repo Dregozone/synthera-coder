@@ -5,8 +5,10 @@ namespace App\Ai\Agents;
 use Laravel\Ai\Attributes\MaxSteps;
 use Laravel\Ai\Contracts\Agent;
 use Laravel\Ai\Contracts\Conversational;
+use Laravel\Ai\Contracts\HasProviderOptions;
 use Laravel\Ai\Contracts\HasTools;
 use Laravel\Ai\Contracts\Tool;
+use Laravel\Ai\Enums\Lab;
 use Laravel\Ai\Messages\Message;
 use Laravel\Ai\Promptable;
 use Laravel\Ai\Responses\AgentResponse;
@@ -19,7 +21,7 @@ use Stringable;
  * purely through configuration rather than a class-per-model.
  */
 #[MaxSteps(12)]
-class LocalAgent implements Agent, Conversational, HasTools
+class LocalAgent implements Agent, Conversational, HasProviderOptions, HasTools
 {
     use Promptable;
 
@@ -55,6 +57,20 @@ class LocalAgent implements Agent, Conversational, HasTools
     public function tools(): iterable
     {
         return $this->availableTools;
+    }
+
+    /**
+     * For LM Studio, how long the model may sit idle before it unloads itself
+     * (`ttl`, seconds): LM Studio loads it when first asked, so it only holds
+     * the GPU while you are using it.
+     *
+     * @return array<string, mixed>
+     */
+    public function providerOptions(Lab|string $provider): array
+    {
+        $ttl = (int) config('synthera-coder.model_ttl', 0);
+
+        return $this->provider === 'lmstudio' && $ttl > 0 ? ['ttl' => $ttl] : [];
     }
 
     /**

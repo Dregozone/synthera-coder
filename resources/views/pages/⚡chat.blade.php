@@ -4,10 +4,14 @@ use App\Jobs\RunAgentTurn;
 use App\Models\AgentAction;
 use App\Models\ChatMessage;
 use App\Models\ChatSession;
+use App\Models\CommandRun;
 use App\Services\AgentActionExecutor;
 use App\Services\AgentRunner;
+use App\Services\BackgroundLauncher;
 use App\Services\ChatService;
 use App\Services\ContextService;
+use App\Services\LmStudio;
+use App\Services\ProjectDirectories;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Lottery;
@@ -16,7 +20,6 @@ use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Attributes\Url;
 use Livewire\Component;
-use Symfony\Component\Process\Process;
 
 new #[Title('Agentic Chat')] class extends Component
 {
@@ -74,6 +77,18 @@ new #[Title('Agentic Chat')] class extends Component
     // the user's message renders immediately before the model is prompted.
     public array $pendingTurn = [];
 
+    // Open on a project from a link (`?project=wifone`, or a worktree as
+    // `?project=wifone.worktrees/issue-12-x`), and a tighter layout for
+    // embedding (`?embed=1`, as Life OS's desks do). Both optional.
+    #[Url]
+    public string $project = '';
+
+    #[Url]
+    public bool $embed = false;
+
+    // The sidebar command running now (its output shown as it comes), or 0.
+    public int $activeRunId = 0;
+
     #[Computed]
     public function messages(): Collection
     {
@@ -114,6 +129,37 @@ new #[Title('Agentic Chat')] class extends Component
             ->first();
     }
 
+    /**
+     * The sidebar command running in this session now, or the one just started.
+     */
+    #[Computed]
+    public function activeRun(): ?CommandRun
+    {
+        $run = CommandRun::query()
+            ->where('chat_session_id', $this->sessionId)
+            ->latest('id')
+            ->first();
+
+        return $run && ($run->isRunning() || $run->id === $this->activeRunId) ? $run : null;
+    }
+
+    /**
+     * The sidebar's commands, by group (Composer, npm, Tests, Git).
+     *
+     * @return array<string, array<string, array{label: string, icon: string, command: string}>>
+     */
+    #[Computed]
+    public function commandGroups(): array
+    {
+        $groups = [];
+
+        foreach (config('synthera-coder.commands', []) as $key => $command) {
+            $groups[$command['group']][$key] = $command;
+        }
+
+        return $groups;
+    }
+
     #[Computed]
     public function recentSessions(): Collection
     {
@@ -124,10 +170,15 @@ new #[Title('Agentic Chat')] class extends Component
             ->get();
     }
 
-    public function mount(ChatService $chatService): void
+    public function mount(ChatService $chatService, ProjectDirectories $directories): void
     {
+        $linked = $this->project !== '' ? $directories->find($this->project) : null;
+
         if (! $this->sessionId) {
-            $this->sessionId = ChatService::nextSessionId();
+            // Opened on a project: carry on with its latest chat rather than starting another.
+            $this->sessionId = $linked !== null
+                ? ($this->latestSessionFor($linked) ?? ChatService::nextSessionId())
+                : ChatService::nextSessionId();
             $this->redirect(request()->fullUrlWithQuery(['sessionId' => $this->sessionId]));
 
             return;
@@ -146,13 +197,38 @@ new #[Title('Agentic Chat')] class extends Component
         $this->defaultChatType = config('synthera-coder.default_chat_type', '');
         $this->currentChatType = $this->defaultChatType;
 
-        // Discover sibling projects to offer as working directories.
-        $this->availableProjects = collect(glob(base_path().'/../*', GLOB_ONLYDIR))
-            ->sortBy(fn ($path) => strtolower(basename((string) $path)))
-            ->mapWithKeys(fn ($path) => [basename((string) $path) => str_replace('synthera-coder/../', '', $path)])
+        // Discover sibling projects (and their worktrees) to offer as working directories.
+        $this->availableProjects = collect($directories->all())
+            ->mapWithKeys(fn (array $project): array => [$project['label'] => $project['path']])
             ->toArray();
 
         $this->loadSessionData();
+
+        // Opened on a project from a link: work in it.
+        if ($linked !== null && ! ProjectDirectories::same($linked, $this->selectedProject)) {
+            $this->selectedProject = $linked;
+            $this->tempSelectedProject = $linked;
+
+            ChatSession::query()
+                ->whereKey($this->sessionId)
+                ->update(['current_working_directory' => $linked]);
+        }
+    }
+
+    /**
+     * The most recently used chat that works in this folder, if any.
+     */
+    private function latestSessionFor(string $path): ?int
+    {
+        $id = ChatSession::query()
+            ->whereNotNull('current_working_directory')
+            ->latest('updated_at')
+            ->limit(200)
+            ->get(['id', 'current_working_directory'])
+            ->first(fn (ChatSession $session): bool => ProjectDirectories::same($session->current_working_directory, $path))
+            ?->id;
+
+        return $id === null ? null : (int) $id;
     }
 
     private function loadSessionData(): void
@@ -510,6 +586,8 @@ new #[Title('Agentic Chat')] class extends Component
     public function changeWorkingDirectory(): void
     {
         $this->selectedProject = $this->tempSelectedProject;
+        // Chosen here: a project from the link no longer applies.
+        $this->project = '';
 
         ChatSession::query()
             ->whereKey($this->sessionId)
@@ -520,32 +598,72 @@ new #[Title('Agentic Chat')] class extends Component
         $this->dispatch('scroll-to-bottom');
     }
 
-    public function runCommand(string $command): void
+    /**
+     * Run one of the sidebar's commands (by its key: only those listed in
+     * config('synthera-coder.commands') can run) in the selected project. It
+     * runs in its own process, so a long one isn't cut off; its output shows as
+     * it comes, and the result is added to the chat when it ends.
+     */
+    public function runCommand(string $key, BackgroundLauncher $launcher): void
     {
+        $command = config('synthera-coder.commands.'.$key);
+
+        if (! is_array($command) || ! isset($command['command'])) {
+            $this->sendToast('That is not one of the commands this page runs.', '', 'danger');
+
+            return;
+        }
+
         if (! is_dir($this->selectedProject)) {
             $this->sendToast('Invalid project directory: '.$this->selectedProject, '', 'danger');
 
             return;
         }
 
-        $process = Process::fromShellCommandline($command, $this->selectedProject);
-        $process->setTimeout(300);
-        $process->run();
+        if ($this->activeRun?->isRunning()) {
+            $this->sendToast('Wait for '.$this->activeRun->command.' to finish first.', '', 'warning');
 
-        $output = trim($process->getOutput());
-        $error = trim($process->getErrorOutput());
+            return;
+        }
 
-        // Many CLI tools (composer, npm, pest) write their human-readable
-        // report to stderr, so include it too. Strip ANSI colour codes so the
-        // output renders cleanly in the chat.
-        $body = trim(preg_replace('/\e\[[0-9;]*m/', '', $output."\n".$error) ?? '');
+        $run = CommandRun::create([
+            'chat_session_id' => $this->sessionId,
+            'command_key' => $key,
+            'command' => $command['command'],
+            'cwd' => $this->selectedProject,
+            'status' => CommandRun::STATUS_RUNNING,
+        ]);
 
-        $this->addMessage(
-            type: 'info',
-            by: 'user',
-            content: "**Ran** `{$command}` (exit {$process->getExitCode()})\n\n```\n".
-                (Str::limit($body, 6000) ?: '(no output)')."\n```",
-        );
+        $this->activeRunId = $run->id;
+        unset($this->activeRun);
+
+        try {
+            $launcher->artisan(['synthera:run-command', (string) $run->id]);
+        } catch (\Throwable $e) {
+            $run->update(['status' => CommandRun::STATUS_FAILED, 'output' => 'It could not be started: '.$e->getMessage(), 'finished_at' => now()]);
+        }
+    }
+
+    /**
+     * While a command runs: its latest output (and, once it ends, the chat).
+     */
+    public function pollRun(): void
+    {
+        unset($this->activeRun);
+
+        if ($this->activeRun && ! $this->activeRun->isRunning()) {
+            $this->loadSessionData();
+            $this->dispatch('scroll-to-bottom');
+        }
+    }
+
+    /**
+     * Close the finished command's output.
+     */
+    public function dismissRun(): void
+    {
+        $this->activeRunId = 0;
+        unset($this->activeRun);
 
         $this->dispatch('scroll-to-bottom');
     }
@@ -607,26 +725,25 @@ new #[Title('Agentic Chat')] class extends Component
      * Ping the local model server to surface warm/cold/offline status without
      * blocking normal page loads (invoked on demand from the sidebar).
      */
-    public function refreshModelStatus(): void
+    public function refreshModelStatus(LmStudio $lmStudio): void
     {
-        $base = rtrim((string) config('ai.providers.lmstudio.url'), '/');
+        $this->modelStatus = $lmStudio->status($this->currentModelId());
+    }
 
-        try {
-            $response = \Illuminate\Support\Facades\Http::timeout(3)->get($base.'/models');
+    /**
+     * Unload the model now, freeing the GPU (it loads again when next asked).
+     */
+    public function unloadModel(LmStudio $lmStudio): void
+    {
+        $unloaded = $lmStudio->unload($this->currentModelId());
 
-            if (! $response->ok()) {
-                $this->modelStatus = 'offline';
+        $this->sendToast($unloaded ? 'Model unloaded: it loads again when next asked.' : 'LM Studio did not unload it (is it loaded, and is LM Studio running?)', '', $unloaded ? 'success' : 'warning');
+        $this->modelStatus = $lmStudio->status($this->currentModelId());
+    }
 
-                return;
-            }
-
-            $loadedModels = collect($response->json('data', []))->pluck('id')->all();
-            $modelId = config('synthera-coder.models', [])[$this->currentModel]['model'] ?? $this->currentModel;
-
-            $this->modelStatus = in_array($modelId, $loadedModels, true) ? 'warm' : 'reachable';
-        } catch (\Throwable) {
-            $this->modelStatus = 'offline';
-        }
+    private function currentModelId(): string
+    {
+        return (string) (config('synthera-coder.models', [])[$this->currentModel]['model'] ?? $this->currentModel);
     }
 };
 ?>
@@ -642,15 +759,13 @@ new #[Title('Agentic Chat')] class extends Component
             }
         },
 
-        async runCommand(command) {
-            await $wire.sendToast('Running command: ' + command, '', 'info');
-            await $wire.runCommand(command);
-            await $wire.sendToast('Finished running command: ' + command, '', 'success');
+        async runCommand(key) {
+            await $wire.runCommand(key);
         },
     }"
     id="container"
     class="w-full flex gap-4"
-    @if ($this->agentIsWorking()) wire:poll.2s="poll" @endif
+    @if ($this->agentIsWorking()) wire:poll.2s="poll" @elseif ($this->activeRun?->isRunning()) wire:poll.1s="pollRun" @endif
     x-on:process-agent-turn.window="$wire.processPendingTurn()"
     x-on:scroll-to-bottom.window="$nextTick(() => { $refs.messages.scrollTop = $refs.messages.scrollHeight })"
 >
@@ -782,6 +897,29 @@ new #[Title('Agentic Chat')] class extends Component
             </div>
         @endif
 
+        {{-- A sidebar command's output, as it comes --}}
+        @if ($run = $this->activeRun)
+            <div class="ml-4 mb-3" data-test="command-run">
+                <flux:card class="!p-3">
+                    <div class="flex items-center gap-2 mb-2">
+                        @if ($run->isRunning())
+                            <flux:icon.arrow-path class="size-4 animate-spin text-sky-500" />
+                            <flux:subheading>Running <code>{{ $run->command }}</code> in {{ basename($run->cwd) }}…</flux:subheading>
+                        @else
+                            <flux:badge size="sm" :color="$run->exit_code === 0 ? 'emerald' : 'rose'">exit {{ $run->exit_code ?? '?' }}</flux:badge>
+                            <flux:subheading><code>{{ $run->command }}</code> finished: its output is in the chat.</flux:subheading>
+                            <flux:button size="xs" variant="ghost" icon="x-mark" class="ml-auto" wire:click="dismissRun" />
+                        @endif
+                    </div>
+                    <pre
+                        x-data
+                        x-effect="$el.scrollTop = $el.scrollHeight"
+                        class="max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-zinc-100 dark:bg-zinc-900 p-2 text-xs leading-snug"
+                    >{{ $run->output ?: 'Starting…' }}</pre>
+                </flux:card>
+            </div>
+        @endif
+
         <div class="ml-4">
             <form wire:submit="sendMessage" class="w-[60%] mx-auto">
                 <flux:composer wire:model="prompt" label="Prompt" label:sr-only placeholder="How can I help you today?">
@@ -867,45 +1005,39 @@ new #[Title('Agentic Chat')] class extends Component
                     </div>
                 </div>
 
-                <flux:subheading size="lg" class="mt-2">Composer:</flux:subheading>
-                <div class="flex flex-wrap items-center gap-2 mb-2">
-                    <flux:button size="sm" variant="outline" icon="shield-check" x-on:click="runCommand('composer audit')">Audit</flux:button>
-                    {{-- Composer has no "audit fix"; updating to patched versions is the remediation. --}}
-                    <flux:button size="sm" variant="outline" icon="chevron-double-up" x-on:click="runCommand('composer update')">Update</flux:button>
-                </div>
-
-                <flux:subheading size="lg" class="mt-2">npm:</flux:subheading>
-                <div class="flex flex-wrap items-center gap-2 mb-2">
-                    <flux:button size="sm" variant="outline" icon="shield-check" x-on:click="runCommand('npm audit')">Audit</flux:button>
-                    <flux:button size="sm" variant="outline" icon="wrench" x-on:click="runCommand('npm audit fix')">Audit fix</flux:button>
-                    <flux:button size="sm" variant="outline" icon="chevron-double-up" x-on:click="runCommand('npm update')">Update</flux:button>
-                </div>
-
-                <flux:subheading size="lg" class="mt-2">Tests:</flux:subheading>
-                <div class="flex flex-wrap items-center gap-2 mb-2">
-                    <flux:button size="sm" variant="outline" icon="beaker" x-on:click="runCommand('php artisan test')">Run tests</flux:button>
-                    <flux:button size="sm" variant="outline" icon="sparkles" x-on:click="runCommand('vendor/bin/pint')">Pint</flux:button>
-                </div>
-
-                <flux:subheading size="lg" class="mt-2">Git:</flux:subheading>
-                <div class="flex items-center gap-2 mb-2">
-                    <flux:button size="sm" icon="arrow-down" x-on:click="runCommand('git pull')">Pull</flux:button>
-                    <flux:button size="sm" icon="arrow-up" x-on:click="runCommand('git push')">Push</flux:button>
-                </div>
+                {{-- Only these run: the page sends a command's key, never a command line (config/synthera-coder.php). --}}
+                @php($running = (bool) $this->activeRun?->isRunning())
+                @foreach ($this->commandGroups as $group => $commands)
+                    <flux:subheading size="lg" class="mt-2">{{ $group }}:</flux:subheading>
+                    <div class="flex flex-wrap items-center gap-2 mb-2">
+                        @foreach ($commands as $key => $command)
+                            <flux:button size="sm" variant="outline" :icon="$command['icon']" x-on:click="runCommand('{{ $key }}')" :disabled="$running" title="{{ $command['command'] }}" data-test="command-{{ $key }}">{{ $command['label'] }}</flux:button>
+                        @endforeach
+                    </div>
+                @endforeach
 
                 <div class="flex items-center justify-between mt-3">
                     <div class="flex items-center gap-2">
                         <flux:subheading>Model:</flux:subheading>
                         @php($statusMeta = [
-                            'warm' => ['emerald', 'Warm'],
+                            'warm' => ['emerald', 'Loaded'],
+                            'cold' => ['zinc', 'Not loaded'],
                             'reachable' => ['amber', 'Reachable'],
                             'offline' => ['rose', 'Offline'],
                             'unknown' => ['zinc', 'Unknown'],
-                        ][$modelStatus])
-                        <flux:badge size="sm" :color="$statusMeta[0]">{{ $statusMeta[1] }}</flux:badge>
+                        ][$modelStatus] ?? ['zinc', 'Unknown'])
+                        <flux:badge size="sm" :color="$statusMeta[0]" data-test="model-status">{{ $statusMeta[1] }}</flux:badge>
                     </div>
-                    <flux:button size="xs" variant="ghost" icon="arrow-path" wire:click="refreshModelStatus" wire:loading.attr="disabled">Check</flux:button>
+                    <div class="flex items-center gap-1">
+                        @if ($modelStatus === 'warm')
+                            <flux:button size="xs" variant="ghost" icon="power" wire:click="unloadModel" wire:loading.attr="disabled" data-test="unload-model">Unload now</flux:button>
+                        @endif
+                        <flux:button size="xs" variant="ghost" icon="arrow-path" wire:click="refreshModelStatus" wire:loading.attr="disabled">Check</flux:button>
+                    </div>
                 </div>
+                @if (config('synthera-coder.model_ttl') > 0)
+                    <flux:text size="sm" class="mt-1">Loads when asked; unloads after {{ (int) ceil(config('synthera-coder.model_ttl') / 60) }} idle {{ Str::plural('minute', (int) ceil(config('synthera-coder.model_ttl') / 60)) }}.</flux:text>
+                @endif
             </flux:card>
 
             {{-- Last check result --}}
@@ -940,6 +1072,7 @@ new #[Title('Agentic Chat')] class extends Component
                 </div>
             </flux:card>
 
+            @unless ($embed)
             <flux:card class="rounded-none !px-6 !py-3 border-t-2 border-zinc-300 dark:border-zinc-700 mt-4">
                 <flux:text class="w-full text-center text-xs text-zinc-500 dark:text-zinc-400">
                     Synthera Coder -
@@ -947,6 +1080,7 @@ new #[Title('Agentic Chat')] class extends Component
                     &copy; {{ date('Y') }} - Version: 0.0.1
                 </flux:text>
             </flux:card>
+            @endunless
         </div>
     </section>
 </div>
