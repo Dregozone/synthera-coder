@@ -76,4 +76,50 @@ return [
     ],
 
     'default_chat_type' => 'agent',
+
+    /*
+    |--------------------------------------------------------------------------
+    | Project Commands
+    |--------------------------------------------------------------------------
+    |
+    | The one-click commands the sidebar offers, by key. Only these can be run
+    | from the page: the browser sends a key, never a command line. Each runs
+    | in the selected project as a background process (so a long `composer
+    | update` is not cut off by the web server), its output shown as it comes.
+    |
+    */
+    'commands' => [
+        'composer-audit' => ['group' => 'Composer', 'label' => 'Audit', 'icon' => 'shield-check', 'command' => 'composer audit'],
+        'composer-outdated' => ['group' => 'Composer', 'label' => 'Outdated', 'icon' => 'clock', 'command' => 'composer outdated --direct'],
+        'composer-update' => ['group' => 'Composer', 'label' => 'Update', 'icon' => 'chevron-double-up', 'command' => 'composer update'],
+        'npm-audit' => ['group' => 'npm', 'label' => 'Audit', 'icon' => 'shield-check', 'command' => 'npm audit'],
+        'npm-audit-fix' => ['group' => 'npm', 'label' => 'Audit fix', 'icon' => 'wrench', 'command' => 'npm audit fix'],
+        'npm-outdated' => ['group' => 'npm', 'label' => 'Outdated', 'icon' => 'clock', 'command' => 'npm outdated'],
+        'npm-update' => ['group' => 'npm', 'label' => 'Update', 'icon' => 'chevron-double-up', 'command' => 'npm update'],
+        'tests' => ['group' => 'Tests', 'label' => 'Run tests', 'icon' => 'beaker', 'command' => 'php artisan test'],
+        'pint' => ['group' => 'Tests', 'label' => 'Pint', 'icon' => 'sparkles', 'command' => 'vendor/bin/pint'],
+        'git-status' => ['group' => 'Git', 'label' => 'Status', 'icon' => 'document-magnifying-glass', 'command' => 'git status'],
+        'git-log' => ['group' => 'Git', 'label' => 'Log', 'icon' => 'list-bullet', 'command' => 'git log --oneline -15'],
+        'git-pull' => ['group' => 'Git', 'label' => 'Pull', 'icon' => 'arrow-down', 'command' => 'git pull --ff-only'],
+        'git-push' => ['group' => 'Git', 'label' => 'Push', 'icon' => 'arrow-up', 'command' => 'git push'],
+    ],
+
+    // The longest a project command may run (seconds).
+    'command_timeout' => (int) env('SYNTHERA_COMMAND_TIMEOUT', 1800),
+
+    // The PHP CLI that runs background commands; found automatically when empty.
+    'php_binary' => env('SYNTHERA_PHP_BINARY'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Model Loading
+    |--------------------------------------------------------------------------
+    |
+    | Seconds a model may sit idle in LM Studio before it unloads itself (sent
+    | as `ttl` with each request; LM Studio loads the model when first asked).
+    | Short by default, so the GPU is free again soon after you stop asking.
+    | 0 leaves loading and unloading to LM Studio's own settings.
+    |
+    */
+    'model_ttl' => (int) env('SYNTHERA_MODEL_TTL', 300),
 ];

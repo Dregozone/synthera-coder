@@ -61,20 +61,22 @@ Everything listed below is **currently implemented** and working.
 - **Sibling-project selector** — Synthera Coder scans the parent directory on startup and presents every sibling folder as a selectable working directory, sorted alphabetically.
 - **Persistent working directory** — the selected project path is saved per session and restored when you return.
 - **Working directory indicator** — the active path is always visible in the sidebar with a folder-open icon.
+- **Worktrees too** — a project's git worktrees (`<project>.worktrees/<branch>`, as tools like Life OS make them for an issue) are listed as `project › branch`.
+- **Open on a project from a link** — `?project=wifone` (or `?project=wifone.worktrees/issue-12-dark-mode`) opens that project, carrying on with its most recent chat (or starting one). An unknown name is ignored.
+- **Compact layout** — `?embed=1` leaves out the footer, for showing the page inside another app (such as a Life OS desk). Both are optional: the app works the same without them.
 
 ### One-Click Project Commands
 
 Run common maintenance commands against the selected project directly from the UI — no terminal required:
 
-- **`composer audit`** — check for known security vulnerabilities in PHP dependencies.
-- **`composer audit fix`** — attempt to automatically resolve vulnerable packages.
-- **`composer update`** — update all Composer packages.
-- **`npm audit`** — check for known vulnerabilities in JavaScript dependencies.
-- **`npm audit fix`** — attempt to automatically resolve vulnerable JS packages.
-- **`npm update`** — update all npm packages.
-- **Git status** and **Git log** — inspect the current state and recent commit history of the project.
+- **Composer** — `composer audit`, `composer outdated --direct`, `composer update`.
+- **npm** — `npm audit`, `npm audit fix`, `npm outdated`, `npm update`.
+- **Tests** — `php artisan test`, Pint.
+- **Git** — status, log, pull (fast-forward only) and push.
 
-All command output is captured and added to the session as an info message so you have a full audit trail.
+- **Only these can run** — the page sends a command's key, never a command line; the list lives in `config/synthera-coder.php` (`commands`).
+- **In the background, shown live** — each runs in its own process (no queue worker needed, on Windows/Herd or macOS/Linux), so a long `composer update` is not cut off by the web server; its output appears as it comes, one command at a time.
+- **An audit trail** — when it ends, the output is added to the session as an info message.
 
 ### AI Tools
 
@@ -214,7 +216,7 @@ npm run build
 
 ### 7. Start the application
 
-**With Laravel Herd** — the site is served automatically at `https://synthera-coder.test`. No further steps needed.
+**With Laravel Herd** — the site is served automatically at `https://synthera-coder.test`. No further steps needed: agent turns run inline (`SYNTHERA_RUN_TURNS_INLINE=true`, the default) and sidebar commands start their own background process, so **no queue worker is needed**.
 
 **Without Herd** — use the built-in dev runner which starts the HTTP server, queue worker, and Vite in one command:
 
@@ -252,6 +254,12 @@ return [
     'default_chat_type' => 'agent',
 ];
 ```
+
+### Loading the model only when it's used
+
+Models load in LM Studio when first asked (its JIT loading) and unload after `SYNTHERA_MODEL_TTL` idle seconds (default `300`), sent as `ttl` with each request, so the GPU is free again soon after you stop. The sidebar shows **Loaded** / **Not loaded**, and **Unload now** frees it at once (through LM Studio's API, else its `lms` command).
+
+In LM Studio, keep the server running (Developer → Start Server, or `lms server start`), leave **Just-in-time model loading** on, and, as a backstop, turn on **Auto unload unused JIT loaded models** with a short **Max idle TTL** (e.g. 5 minutes).
 
 ### Adding a new Ollama model
 
