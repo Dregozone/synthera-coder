@@ -18,7 +18,8 @@
         @vite(['resources/css/app.css', 'resources/js/app.js'])
         @fluxAppearance
     </head>
-    <body>
+    {{-- The page's own background, light or dark: without it, dark mode's light text sat on white. --}}
+    <body class="min-h-screen bg-white antialiased dark:bg-zinc-800">
         {{ $slot }}
 
         @persist('toast')
