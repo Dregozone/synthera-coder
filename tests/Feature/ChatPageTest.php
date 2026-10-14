@@ -306,3 +306,10 @@ test('session context is written to an isolated directory during tests', functio
         ->and($contextFilePath)->not->toStartWith(app_path('Ai/Sessions'))
         ->and(File::exists($contextFilePath))->toBeTrue();
 });
+
+test('the page paints its own background, light or dark, so dark mode never puts light text on white', function (): void {
+    $this->followingRedirects()
+        ->get('/')
+        ->assertOk()
+        ->assertSee('<body class="min-h-screen bg-white antialiased dark:bg-zinc-800">', false);
+});
