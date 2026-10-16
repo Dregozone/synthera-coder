@@ -10,6 +10,7 @@ use App\Services\AgentRunner;
 use App\Services\BackgroundLauncher;
 use App\Services\ChatService;
 use App\Services\ContextService;
+use App\Services\DiffService;
 use App\Services\LmStudio;
 use App\Services\ProjectDirectories;
 use Illuminate\Database\Eloquent\Collection;
@@ -116,6 +117,24 @@ new #[Title('Agentic Chat')] class extends Component
             ->where('status', AgentAction::STATUS_PENDING)
             ->orderBy('id')
             ->get();
+    }
+
+    /**
+     * Each proposed write's diff, split into numbered rows for the changes panel.
+     *
+     * @return array<int, array{added: int, removed: int, segments: list<array{folded: bool, rows: list<array{type: 'add'|'remove'|'context', old: int|null, new: int|null, text: string}>}>}>
+     */
+    #[Computed]
+    public function pendingDiffs(): array
+    {
+        $diffs = app(DiffService::class);
+
+        return $this->pendingActions
+            ->where('type', AgentAction::TYPE_WRITE)
+            ->mapWithKeys(fn (AgentAction $action): array => [
+                $action->id => $diffs->rows((string) ($action->payload['diff'] ?? '')),
+            ])
+            ->all();
     }
 
     #[Computed]
@@ -453,15 +472,53 @@ new #[Title('Agentic Chat')] class extends Component
 
         $action->update(['status' => AgentAction::STATUS_REJECTED]);
 
-        $label = $action->type === AgentAction::TYPE_WRITE
-            ? 'write to '.($action->payload['path'] ?? 'file')
-            : "command '".($action->payload['command'] ?? '')."'";
-
-        $this->addMessage(type: 'info', by: 'user', content: 'Rejected proposed '.$label.'.');
+        $this->addMessage(type: 'info', by: 'user', content: 'Rejected proposed '.$this->actionLabel($action).'.');
 
         $this->maybeContinueAfterActions();
 
         $this->dispatch('scroll-to-bottom');
+    }
+
+    /**
+     * Turn down a proposed action with a note of what to change instead; the
+     * note goes back to the model so it can propose a revised action.
+     */
+    public function requestChanges(int $actionId, string $note): void
+    {
+        $note = trim($note);
+
+        if ($note === '') {
+            $this->sendToast('Say what should change before sending it back.', '', 'warning');
+
+            return;
+        }
+
+        $action = AgentAction::query()
+            ->where('chat_session_id', $this->sessionId)
+            ->where('status', AgentAction::STATUS_PENDING)
+            ->find($actionId);
+
+        if (! $action) {
+            return;
+        }
+
+        $action->update([
+            'status' => AgentAction::STATUS_REJECTED,
+            'result' => $note,
+        ]);
+
+        $this->addMessage(type: 'info', by: 'user', content: 'Requested changes to the proposed '.$this->actionLabel($action).":\n\n".$note);
+
+        $this->maybeContinueAfterActions();
+
+        $this->dispatch('scroll-to-bottom');
+    }
+
+    private function actionLabel(AgentAction $action): string
+    {
+        return $action->type === AgentAction::TYPE_WRITE
+            ? 'write to '.($action->payload['path'] ?? 'file')
+            : "command '".($action->payload['command'] ?? '')."'";
     }
 
     public function approveAllActions(AgentActionExecutor $executor): void
@@ -519,6 +576,11 @@ new #[Title('Agentic Chat')] class extends Component
         }
 
         $lines = $resolved->map(function (AgentAction $action): string {
+            // A rejection's result, when there is one, is the change the user asked for instead.
+            if ($action->status === AgentAction::STATUS_REJECTED && filled($action->result)) {
+                return ucfirst($this->actionLabel($action)).": rejected. The user asked for these changes instead:\n".$action->result;
+            }
+
             if ($action->type === AgentAction::TYPE_WRITE) {
                 return "Write to {$action->payload['path']}: {$action->status}.";
             }
@@ -769,8 +831,10 @@ new #[Title('Agentic Chat')] class extends Component
     x-on:process-agent-turn.window="$wire.processPendingTurn()"
     x-on:scroll-to-bottom.window="$nextTick(() => { $refs.messages.scrollTop = $refs.messages.scrollHeight })"
 >
-    {{-- Left side --}}
-    <section class="w-3/4 flex flex-col h-screen py-4">
+    @php($hasChanges = $this->pendingActions->isNotEmpty())
+
+    {{-- Left side: the chat, narrowed to a third while there are changes to review --}}
+    <section @class(['flex flex-col h-screen py-4', 'w-1/3' => $hasChanges, 'w-3/4' => ! $hasChanges])>
         {{-- Main output screen --}}
         <div
             x-ref="messages"
@@ -850,53 +914,6 @@ new #[Title('Agentic Chat')] class extends Component
             </div>
         </div>
 
-        {{-- Pending approvals --}}
-        @if ($this->pendingActions->isNotEmpty())
-            <div class="ml-4 mb-4">
-                <flux:card class="border-amber-300 dark:border-amber-700">
-                    <div class="flex items-center justify-between mb-3">
-                        <flux:heading size="sm">
-                            {{ $this->pendingActions->count() }} proposed {{ Str::plural('action', $this->pendingActions->count()) }} awaiting your approval
-                        </flux:heading>
-                        <flux:button size="sm" variant="primary" icon="check" wire:click="approveAllActions" wire:loading.attr="disabled">
-                            Approve all
-                        </flux:button>
-                    </div>
-
-                    <div class="flex flex-col gap-3 max-h-72 overflow-y-auto">
-                        @foreach ($this->pendingActions as $action)
-                            <div wire:key="action-{{ $action->id }}" class="border border-zinc-200 dark:border-zinc-700 rounded-xl p-3">
-                                <div class="flex items-center justify-between mb-2">
-                                    @if ($action->type === \App\Models\AgentAction::TYPE_WRITE)
-                                        <flux:badge color="violet" size="sm" icon="pencil-square">
-                                            {{ ($action->payload['is_new'] ?? false) ? 'Create' : 'Edit' }} {{ $action->payload['path'] ?? '' }}
-                                        </flux:badge>
-                                    @else
-                                        <flux:badge color="amber" size="sm" icon="command-line">Run command</flux:badge>
-                                    @endif
-
-                                    <div class="flex gap-2">
-                                        <flux:button size="xs" variant="primary" icon="check" wire:click="approveAction({{ $action->id }})" wire:loading.attr="disabled">Approve</flux:button>
-                                        <flux:button size="xs" variant="ghost" icon="x-mark" wire:click="rejectAction({{ $action->id }})" wire:loading.attr="disabled">Reject</flux:button>
-                                    </div>
-                                </div>
-
-                                @if ($action->type === \App\Models\AgentAction::TYPE_WRITE)
-                                    <pre class="text-xs overflow-x-auto max-h-48 bg-zinc-50 dark:bg-zinc-950 rounded-lg p-2 whitespace-pre-wrap">@foreach (explode("\n", (string) ($action->payload['diff'] ?? '')) as $line)<span @class([
-                                        'text-emerald-600 dark:text-emerald-400' => str_starts_with($line, '+'),
-                                        'text-rose-600 dark:text-rose-400' => str_starts_with($line, '-'),
-                                        'text-zinc-500' => str_starts_with($line, '---') || str_starts_with($line, '+++'),
-                                    ])>{{ $line }}</span>&#10;@endforeach</pre>
-                                @else
-                                    <pre class="text-xs bg-zinc-50 dark:bg-zinc-950 rounded-lg p-2 whitespace-pre-wrap">{{ $action->payload['command'] ?? '' }}</pre>
-                                @endif
-                            </div>
-                        @endforeach
-                    </div>
-                </flux:card>
-            </div>
-        @endif
-
         {{-- A sidebar command's output, as it comes --}}
         @if ($run = $this->activeRun)
             <div class="ml-4 mb-3" data-test="command-run">
@@ -921,7 +938,7 @@ new #[Title('Agentic Chat')] class extends Component
         @endif
 
         <div class="ml-4">
-            <form wire:submit="sendMessage" class="w-[60%] mx-auto">
+            <form wire:submit="sendMessage" @class(['w-full' => $hasChanges, 'w-[60%] mx-auto' => ! $hasChanges])>
                 <flux:composer wire:model="prompt" label="Prompt" label:sr-only placeholder="How can I help you today?">
                     <x-slot name="actionsLeading">
                         @include('pages.includes.composer-leading')
@@ -935,6 +952,13 @@ new #[Title('Agentic Chat')] class extends Component
             </form>
         </div>
     </section>
+
+    {{-- Middle: the proposed changes, to review and accept, run, send back or reject --}}
+    @if ($hasChanges)
+        <section class="flex-1 min-w-0 h-screen py-4" data-test="changes-panel">
+            @include('pages.includes.changes-panel', ['actions' => $this->pendingActions, 'diffs' => $this->pendingDiffs])
+        </section>
+    @endif
 
     {{-- Right side --}}
     <section class="w-1/4 h-screen flex flex-col border-l-2 border-zinc-300 dark:border-zinc-700">

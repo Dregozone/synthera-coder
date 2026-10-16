@@ -244,3 +244,118 @@ select:focus[data-flux-control] {
         border-top-color: #404040;
     }
 }
+[x-cloak] {
+    display: none !important;
+}
+
+/* Code in the changes panel, highlighted by highlight.js (GitHub's colours, light and dark) */
+.hljs-comment,
+.hljs-quote {
+    color: #6e7781;
+    font-style: italic;
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-meta .hljs-keyword,
+.hljs-template-tag,
+.hljs-type {
+    color: #cf222e;
+}
+
+.hljs-string,
+.hljs-regexp,
+.hljs-meta .hljs-string {
+    color: #0a3069;
+}
+
+.hljs-number,
+.hljs-literal,
+.hljs-attr,
+.hljs-attribute,
+.hljs-variable,
+.hljs-template-variable,
+.hljs-selector-attr,
+.hljs-selector-class,
+.hljs-selector-id,
+.hljs-symbol {
+    color: #0550ae;
+}
+
+.hljs-title,
+.hljs-title.class_,
+.hljs-title.function_,
+.hljs-section {
+    color: #8250df;
+}
+
+.hljs-name,
+.hljs-tag,
+.hljs-built_in,
+.hljs-meta {
+    color: #116329;
+}
+
+.hljs-deletion {
+    color: #82071e;
+}
+
+.hljs-addition {
+    color: #116329;
+}
+
+.dark {
+    & .hljs-comment,
+    & .hljs-quote {
+        color: #8b949e;
+    }
+
+    & .hljs-keyword,
+    & .hljs-selector-tag,
+    & .hljs-meta .hljs-keyword,
+    & .hljs-template-tag,
+    & .hljs-type {
+        color: #ff7b72;
+    }
+
+    & .hljs-string,
+    & .hljs-regexp,
+    & .hljs-meta .hljs-string {
+        color: #a5d6ff;
+    }
+
+    & .hljs-number,
+    & .hljs-literal,
+    & .hljs-attr,
+    & .hljs-attribute,
+    & .hljs-variable,
+    & .hljs-template-variable,
+    & .hljs-selector-attr,
+    & .hljs-selector-class,
+    & .hljs-selector-id,
+    & .hljs-symbol {
+        color: #79c0ff;
+    }
+
+    & .hljs-title,
+    & .hljs-title.class_,
+    & .hljs-title.function_,
+    & .hljs-section {
+        color: #d2a8ff;
+    }
+
+    & .hljs-name,
+    & .hljs-tag,
+    & .hljs-built_in,
+    & .hljs-meta {
+        color: #7ee787;
+    }
+
+    & .hljs-deletion {
+        color: #ffdcd7;
+    }
+
+    & .hljs-addition {
+        color: #aff5b4;
+    }
+}
