@@ -313,3 +313,100 @@ test('the page paints its own background, light or dark, so dark mode never puts
         ->assertOk()
         ->assertSee('<body class="min-h-screen bg-white antialiased dark:bg-zinc-800">', false);
 });
+
+test('proposed changes open a review panel beside a narrowed chat, with each file diff and its actions', function (): void {
+    $session = ChatSession::create([
+        'current_working_directory' => base_path(),
+        'current_chat_type' => 'agent',
+    ]);
+
+    AgentAction::create([
+        'chat_session_id' => $session->id,
+        'type' => AgentAction::TYPE_WRITE,
+        'status' => AgentAction::STATUS_PENDING,
+        'payload' => [
+            'path' => 'app/Greeter.php',
+            'contents' => "<?php\n\necho 'hello';",
+            'diff' => "--- app/Greeter.php\n+++ app/Greeter.php\n <?php\n \n-echo 'hi';\n+echo 'hello';",
+            'is_new' => false,
+        ],
+    ]);
+
+    AgentAction::create([
+        'chat_session_id' => $session->id,
+        'type' => AgentAction::TYPE_COMMAND,
+        'status' => AgentAction::STATUS_PENDING,
+        'payload' => ['command' => 'php artisan test', 'cwd' => base_path()],
+    ]);
+
+    Livewire::test('pages::chat', ['sessionId' => $session->id])
+        ->assertSeeHtml('data-test="changes-panel"')
+        ->assertSeeHtml('w-1/3')
+        ->assertSeeText('1 file and 1 command')
+        ->assertSeeText('awaiting your approval')
+        ->assertSeeText('app/Greeter.php')
+        ->assertSeeText('+1')
+        ->assertSeeText("echo 'hello';")
+        ->assertSeeHtml('data-language="php"')
+        ->assertSeeText('php artisan test')
+        ->assertSeeText('Accept')
+        ->assertSeeText('Run')
+        ->assertSeeText('Request changes')
+        ->assertSeeText('Reject');
+});
+
+test('without proposed changes the chat keeps its full width and no review panel shows', function (): void {
+    $session = ChatSession::create(['current_working_directory' => base_path()]);
+
+    Livewire::test('pages::chat', ['sessionId' => $session->id])
+        ->assertDontSeeHtml('data-test="changes-panel"')
+        ->assertSeeHtml('w-3/4');
+});
+
+test('requesting changes sends the note back to the model and turns the proposal down', function (): void {
+    $session = ChatSession::create([
+        'current_working_directory' => base_path(),
+        'current_model' => 'qwen/qwen3.5-9b',
+        'current_chat_type' => 'agent',
+    ]);
+
+    File::deleteDirectory(ContextService::sessionDirectory($session->id));
+
+    $action = AgentAction::create([
+        'chat_session_id' => $session->id,
+        'type' => AgentAction::TYPE_WRITE,
+        'status' => AgentAction::STATUS_PENDING,
+        'payload' => ['path' => 'notes.txt', 'contents' => 'hello world'],
+    ]);
+
+    Livewire::test('pages::chat', ['sessionId' => $session->id])
+        ->call('requestChanges', $action->id, '  Say goodbye instead.  ')
+        ->assertSet('pendingTurn.kind', 'continue')
+        ->assertSet('pendingTurn.feedback', fn (string $feedback): bool => str_contains($feedback, "Write to notes.txt: rejected. The user asked for these changes instead:\nSay goodbye instead."))
+        ->assertDispatched('process-agent-turn');
+
+    expect($action->fresh())
+        ->status->toBe(AgentAction::STATUS_REJECTED)
+        ->result->toBe('Say goodbye instead.')
+        ->and(ChatMessage::query()
+            ->where('chat_session_id', $session->id)
+            ->where('content', "Requested changes to the proposed write to notes.txt:\n\nSay goodbye instead.")
+            ->exists())->toBeTrue();
+});
+
+test('requesting changes without saying what to change leaves the proposal pending', function (): void {
+    $session = ChatSession::create(['current_working_directory' => base_path()]);
+
+    $action = AgentAction::create([
+        'chat_session_id' => $session->id,
+        'type' => AgentAction::TYPE_COMMAND,
+        'status' => AgentAction::STATUS_PENDING,
+        'payload' => ['command' => 'php artisan test', 'cwd' => base_path()],
+    ]);
+
+    Livewire::test('pages::chat', ['sessionId' => $session->id])
+        ->call('requestChanges', $action->id, '   ')
+        ->assertNotDispatched('process-agent-turn');
+
+    expect($action->fresh()->status)->toBe(AgentAction::STATUS_PENDING);
+});
