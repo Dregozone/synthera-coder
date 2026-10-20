@@ -92,7 +92,7 @@ Currently implemented tools:
 
 ### Agent Setup
 
-How the agent behaves and sounds lives in plain markdown files in `app/Ai/Setup/` — a **Soul** (persona), **Guidelines** (standing rules) and **Instructions** (the task) — chosen per mode in config. Change the agent's behaviour by editing a markdown file, not PHP. See [Agent Setup: Soul, Guidelines & Instructions](#agent-setup-soul-guidelines--instructions).
+How the agent behaves and sounds lives in plain markdown files in `app/Ai/Setup/` — a **Soul** (persona), **Guidelines** (standing rules) and **Instructions** (the task) — chosen per mode in config. Each chat picks its own soul and guidelines from the composer or the sidebar's **Agent** card (with a preview of the exact system prompt), and the **setup page** (`/setup`) edits the files and the defaults for new chats. Change the agent's behaviour by editing a markdown file, not PHP. See [Agent Setup: Soul, Guidelines & Instructions](#agent-setup-soul-guidelines--instructions).
 
 ### Model Selection
 
@@ -305,6 +305,12 @@ Profiles in `config/synthera-coder.php` name the files (without `.md`) each agen
 
 A profile without a `soul` key uses `default_soul`; `'soul' => 'mentor'` overrides it for that profile; `'soul' => null` loads none.
 
+#### Choosing in the app
+
+- **Per chat:** the soul picker in the composer, or **Agent → Configure** in the sidebar, sets this chat's soul (or the default, or none) and ticks its guidelines. Until you change them, a chat's guidelines follow its mode's profile; once changed they stay with the chat (**Use the mode's** goes back). Changes apply from the next message. **Preview** shows the system prompt the next turn will send.
+- **Defaults:** the setup page (`/setup`, or **Agent → Setup files**) sets the soul, mode and model new chats start with. These are stored in the database and override `default_soul`, `default_chat_type` and `default_chat_model`; choose "From config" for the soul to go back to `.env`.
+- **Files:** the setup page lists each folder's files with a one-line description, and creates, edits and deletes them. A file a profile or the default soul needs can't be deleted; a chat that picked a deleted soul or guideline falls back to its defaults. Profiles themselves stay in config.
+
 #### Placeholders
 
 Files may contain `{{ placeholders }}`, filled in when the prompt is built. The chat modes pass `{{ working_directory }}` and `{{ top_level }}` (the project's top-level files and folders), used by `Instructions/workspace.md`. Unknown placeholders are left as they are.
@@ -343,6 +349,8 @@ A name that does not match a file (or a profile that is not configured) throws, 
 
 | Change | Expected outcome |
 |---|---|
+| Pick **Mentor** in the composer's soul picker | From the next message, this chat's agent explains its steps; other chats are unchanged. |
+| Untick `small-models` in a chat's Agent setup | That chat's prompt drops the "one step at a time" rules (check with **Preview**); the badge shows "Custom for this chat". |
 | Set `SYNTHERA_SOUL=mentor` in `.env` | In every mode the agent explains why it is making each change, names the Laravel convention involved, and suggests a small next step for you to try. |
 | Set `SYNTHERA_SOUL=terse` | Replies shrink to bullet points and code with no preamble or recap — useful once you trust the agent and want speed. |
 | Add `'soul' => 'mentor'` to the `plan` profile only | Plans come with explanations for learning; Agent mode stays brief and practical. |

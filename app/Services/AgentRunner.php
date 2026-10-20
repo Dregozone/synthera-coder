@@ -143,18 +143,28 @@ class AgentRunner
 
     /**
      * Compose the system prompt for the session's chat mode from the markdown
-     * files in app/Ai/Setup, as chosen by the mode's agent profile.
+     * files in app/Ai/Setup, as chosen by the mode's agent profile and the
+     * soul and guidelines picked for the chat.
      */
-    private function systemPrompt(ChatSession $session): string
+    public function systemPrompt(ChatSession $session): string
+    {
+        return $this->agentSetup->forProfile(self::profileFor($session), [
+            'working_directory' => (string) $session->current_working_directory,
+            'top_level' => $this->workingDirectorySummary($session->current_working_directory),
+        ], [
+            'soul' => $session->soul,
+            'guidelines' => $session->guidelines,
+        ]);
+    }
+
+    /**
+     * The agent profile for the session's chat mode (the mode's own, else agent).
+     */
+    public static function profileFor(ChatSession $session): string
     {
         $mode = $session->current_chat_type ?: 'agent';
 
-        $profile = array_key_exists($mode, config('synthera-coder.agent_profiles', [])) ? $mode : 'agent';
-
-        return $this->agentSetup->forProfile($profile, [
-            'working_directory' => (string) $session->current_working_directory,
-            'top_level' => $this->workingDirectorySummary($session->current_working_directory),
-        ]);
+        return array_key_exists($mode, config('synthera-coder.agent_profiles', [])) ? $mode : 'agent';
     }
 
     private function workingDirectorySummary(?string $directory): string

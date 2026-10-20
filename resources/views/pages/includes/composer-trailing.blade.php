@@ -1,6 +1,33 @@
+{{-- Soul selection: who the agent is in this chat --}}
+<flux:select
+    wire:model.live="currentSoul"
+    variant="listbox"
+    size="sm"
+    class="ml-2 max-w-[10rem]"
+    data-test="soul-select"
+>
+    <flux:select.option value="">
+        <div class="flex items-center gap-2">
+            <flux:icon.face-smile variant="mini" class="text-zinc-400" /> Default{{ $this->defaultSoul ? ' ('.$this->defaultSoul.')' : '' }}
+        </div>
+    </flux:select.option>
+    @foreach ($this->soulOptions as $soul => $summary)
+        <flux:select.option :value="$soul">
+            <div class="flex items-center gap-2" title="{{ $summary }}">
+                <flux:icon.face-smile variant="mini" class="text-zinc-400" /> {{ ucfirst($soul) }}
+            </div>
+        </flux:select.option>
+    @endforeach
+    <flux:select.option value="{{ \App\Services\AgentSetup::NO_SOUL }}">
+        <div class="flex items-center gap-2">
+            <flux:icon.no-symbol variant="mini" class="text-zinc-400" /> No soul
+        </div>
+    </flux:select.option>
+</flux:select>
+
 {{-- Chat type selection --}}
 <flux:select 
-    wire:model="currentChatType"
+    wire:model.live="currentChatType"
     variant="listbox" 
     size="sm"
     class="ml-2 max-w-[10rem]"

@@ -7,6 +7,8 @@ use App\Models\ChatSession;
 use App\Models\CommandRun;
 use App\Services\AgentActionExecutor;
 use App\Services\AgentRunner;
+use App\Services\AgentSetup;
+use App\Services\AppSettings;
 use App\Services\BackgroundLauncher;
 use App\Services\ChatService;
 use App\Services\ContextService;
@@ -46,6 +48,16 @@ new #[Title('Agentic Chat')] class extends Component
     public string $defaultChatType = '';
 
     public string $currentChatType = '';
+
+    // The chat's soul: '' for the default soul, AgentSetup::NO_SOUL for none, or a soul's name.
+    public string $currentSoul = '';
+
+    // The chat's guidelines; until the user changes them, those of the mode's profile.
+    public array $selectedGuidelines = [];
+
+    public bool $guidelinesCustomized = false;
+
+    public bool $showPromptPreview = false;
 
     public string $sessionTitle = '';
 
@@ -179,6 +191,60 @@ new #[Title('Agentic Chat')] class extends Component
         return $groups;
     }
 
+    /**
+     * The souls a chat can pick, by name, with a one-line description of each.
+     *
+     * @return array<string, string>
+     */
+    #[Computed]
+    public function soulOptions(): array
+    {
+        return $this->describe(AgentSetup::SOUL);
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    #[Computed]
+    public function guidelineOptions(): array
+    {
+        return $this->describe(AgentSetup::GUIDELINES);
+    }
+
+    #[Computed]
+    public function defaultSoul(): ?string
+    {
+        return app(AgentSetup::class)->defaultSoul();
+    }
+
+    /**
+     * The exact system prompt the next turn will send, with the choices on screen.
+     */
+    #[Computed]
+    public function promptPreview(): string
+    {
+        $session = ChatSession::query()->find($this->sessionId) ?? new ChatSession;
+
+        $session->current_chat_type = $this->currentChatType;
+        $session->current_working_directory = $this->selectedProject;
+        $session->soul = $this->currentSoul ?: null;
+        $session->guidelines = $this->guidelinesCustomized ? $this->selectedGuidelines : null;
+
+        return app(AgentRunner::class)->systemPrompt($session);
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function describe(string $category): array
+    {
+        $setup = app(AgentSetup::class);
+
+        return collect($setup->options($category))
+            ->mapWithKeys(fn (string $name): array => [$name => $setup->summary($category, $name)])
+            ->all();
+    }
+
     #[Computed]
     public function recentSessions(): Collection
     {
@@ -208,13 +274,16 @@ new #[Title('Agentic Chat')] class extends Component
             ->winner(fn () => $chatService->maintenanceTasks())
             ->choose();
 
+        $settings = app(AppSettings::class);
+
         $this->availableModels = config('synthera-coder.chat_models', []);
-        $this->defaultModel = config('synthera-coder.default_chat_model', '');
+        $this->defaultModel = $settings->defaultChatModel();
         $this->currentModel = $this->defaultModel;
 
         $this->availableChatTypes = config('synthera-coder.chat_types', []);
-        $this->defaultChatType = config('synthera-coder.default_chat_type', '');
+        $this->defaultChatType = $settings->defaultChatType();
         $this->currentChatType = $this->defaultChatType;
+        $this->selectedGuidelines = $this->modeGuidelines();
 
         // Discover sibling projects (and their worktrees) to offer as working directories.
         $this->availableProjects = collect($directories->all())
@@ -253,7 +322,7 @@ new #[Title('Agentic Chat')] class extends Component
     private function loadSessionData(): void
     {
         $session = ChatSession::query()
-            ->select(['id', 'title', 'number_of_messages', 'current_model', 'current_chat_type', 'current_working_directory'])
+            ->select(['id', 'title', 'number_of_messages', 'current_model', 'current_chat_type', 'current_working_directory', 'soul', 'guidelines'])
             ->find($this->sessionId);
 
         if (! $session) {
@@ -266,6 +335,9 @@ new #[Title('Agentic Chat')] class extends Component
         $this->numberOfMessages = $session->number_of_messages ?? 0;
         $this->selectedProject = $session->current_working_directory ?? '';
         $this->tempSelectedProject = $this->selectedProject;
+        $this->currentSoul = $session->soul ?? '';
+        $this->guidelinesCustomized = $session->guidelines !== null;
+        $this->selectedGuidelines = $session->guidelines ?? $this->modeGuidelines();
 
         $models = config('synthera-coder.models', []);
         $this->contextWindow = (int) ($models[$this->currentModel]['context_window'] ?? 8192);
@@ -298,6 +370,88 @@ new #[Title('Agentic Chat')] class extends Component
     private function contextService(): ContextService
     {
         return new ContextService($this->sessionId);
+    }
+
+    /**
+     * The guidelines the current chat mode's profile loads.
+     *
+     * @return array<int, string>
+     */
+    private function modeGuidelines(): array
+    {
+        $profile = array_key_exists($this->currentChatType, config('synthera-coder.agent_profiles', []))
+            ? $this->currentChatType
+            : 'agent';
+
+        return app(AgentSetup::class)->profileGuidelines($profile);
+    }
+
+    /**
+     * A new mode applies at once: kept for the chat, and its guidelines shown
+     * unless the chat has its own.
+     */
+    public function updatedCurrentChatType(): void
+    {
+        if (! array_key_exists($this->currentChatType, $this->availableChatTypes)) {
+            $this->currentChatType = $this->defaultChatType;
+        }
+
+        $this->syncSessionConfiguration();
+
+        if (! $this->guidelinesCustomized) {
+            $this->selectedGuidelines = $this->modeGuidelines();
+        }
+    }
+
+    /**
+     * Pick the chat's soul: '' for the default, AgentSetup::NO_SOUL for none.
+     */
+    public function updatedCurrentSoul(): void
+    {
+        if ($this->currentSoul !== '' && $this->currentSoul !== AgentSetup::NO_SOUL && ! array_key_exists($this->currentSoul, $this->soulOptions)) {
+            $this->currentSoul = '';
+        }
+
+        ChatSession::query()
+            ->whereKey($this->sessionId)
+            ->update(['soul' => $this->currentSoul ?: null]);
+
+        $this->sendToast(match ($this->currentSoul) {
+            '' => 'This chat now uses the default soul'.($this->defaultSoul ? " ({$this->defaultSoul})" : '').'.',
+            AgentSetup::NO_SOUL => 'This chat now has no soul: just the guidelines and instructions.',
+            default => "This chat's soul is now {$this->currentSoul}.",
+        });
+    }
+
+    /**
+     * The chat keeps its own guidelines from the first change on.
+     */
+    public function updatedSelectedGuidelines(): void
+    {
+        $this->selectedGuidelines = array_values(array_intersect(array_keys($this->guidelineOptions), $this->selectedGuidelines));
+        $this->guidelinesCustomized = true;
+
+        ChatSession::query()
+            ->whereKey($this->sessionId)
+            ->update(['guidelines' => json_encode($this->selectedGuidelines)]);
+    }
+
+    /**
+     * Go back to the guidelines of the chat mode's profile.
+     */
+    public function resetGuidelines(): void
+    {
+        $this->guidelinesCustomized = false;
+        $this->selectedGuidelines = $this->modeGuidelines();
+
+        ChatSession::query()
+            ->whereKey($this->sessionId)
+            ->update(['guidelines' => null]);
+    }
+
+    public function togglePromptPreview(): void
+    {
+        $this->showPromptPreview = ! $this->showPromptPreview;
     }
 
     private function syncSessionConfiguration(): void
@@ -943,6 +1097,7 @@ new #[Title('Agentic Chat')] class extends Component
                     <x-slot name="actionsLeading">
                         @include('pages.includes.composer-leading')
                         @include('pages.includes.command')
+                        @include('pages.includes.agent-setup-modal')
                     </x-slot>
 
                     <x-slot name="actionsTrailing" class="gap-2">
@@ -1062,6 +1217,33 @@ new #[Title('Agentic Chat')] class extends Component
                 @if (config('synthera-coder.model_ttl') > 0)
                     <flux:text size="sm" class="mt-1">Loads when asked; unloads after {{ (int) ceil(config('synthera-coder.model_ttl') / 60) }} idle {{ Str::plural('minute', (int) ceil(config('synthera-coder.model_ttl') / 60)) }}.</flux:text>
                 @endif
+            </flux:card>
+
+            {{-- The agent for this chat: its soul and guidelines --}}
+            <flux:card class="mx-2 mt-4" data-test="agent-card">
+                <div class="flex justify-between items-center gap-2">
+                    <flux:subheading>Agent</flux:subheading>
+                    <div class="flex items-center gap-1">
+                        <flux:modal.trigger name="agent-setup">
+                            <flux:button size="xs" variant="ghost" icon="adjustments-horizontal">Configure</flux:button>
+                        </flux:modal.trigger>
+                        <flux:button size="xs" variant="ghost" icon="cog-6-tooth" href="{{ route('agent-setup', ['sessionId' => $sessionId, 'embed' => $embed ?: null]) }}">Setup files</flux:button>
+                    </div>
+                </div>
+                <div class="mt-2 flex flex-wrap items-center gap-1">
+                    <flux:badge size="sm" icon="face-smile" color="violet">
+                        @if ($currentSoul === \App\Services\AgentSetup::NO_SOUL)
+                            No soul
+                        @else
+                            {{ ucfirst($currentSoul ?: ($this->defaultSoul ?? 'none')) }}{{ $currentSoul === '' ? ' (default)' : '' }}
+                        @endif
+                    </flux:badge>
+                    @forelse ($selectedGuidelines as $guideline)
+                        <flux:badge size="sm" wire:key="guideline-badge-{{ $guideline }}">{{ $guideline }}</flux:badge>
+                    @empty
+                        <flux:text size="sm">No guidelines</flux:text>
+                    @endforelse
+                </div>
             </flux:card>
 
             {{-- Last check result --}}
