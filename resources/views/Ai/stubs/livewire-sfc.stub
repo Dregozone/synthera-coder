@@ -1,0 +1,30 @@
+{{--
+    A Livewire 4 single-file component: the PHP class and its Blade template in one file.
+    Create with `php artisan make:livewire post.create`, which makes resources/views/components/post/⚡create.blade.php.
+    Source: https://livewire.laravel.com/docs/4.x/components
+    Source: https://livewire.laravel.com/docs/4.x/forms
+--}}
+<?php
+
+use Livewire\Attributes\Validate;
+use Livewire\Component;
+
+new class extends Component {
+    #[Validate('required|min:3')]
+    public $title = '';
+
+    public function save()
+    {
+        $this->validate();
+
+        // Save logic here...
+    }
+};
+?>
+
+<form wire:submit="save">
+    <input type="text" wire:model="title">
+    @error('title') <span class="error">{{ $message }}</span> @enderror
+
+    <button type="submit">Save</button>
+</form>

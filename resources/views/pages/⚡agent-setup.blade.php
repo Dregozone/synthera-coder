@@ -2,6 +2,8 @@
 
 use App\Services\AgentSetup;
 use App\Services\AppSettings;
+use App\Services\DocSources;
+use App\Services\WebDocs;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Attributes\Url;
@@ -46,6 +48,22 @@ new #[Title('Agent Setup')] class extends Component
     public array $profileInstructions = [];
 
     public bool $showProfilePreview = false;
+
+    // The docs source open in its editor ('' when none), or a new one being added.
+    public string $editingSource = '';
+
+    public bool $creatingSource = false;
+
+    public string $sourceKey = '';
+
+    public string $sourceName = '';
+
+    public string $sourceBaseUrl = '';
+
+    // One page path per line.
+    public string $sourcePages = '';
+
+    public bool $sourceEnabled = true;
 
     public function mount(AppSettings $settings): void
     {
@@ -359,6 +377,178 @@ new #[Title('Agent Setup')] class extends Component
         unset($this->files);
     }
 
+    /**
+     * Every approved docs source, with how much of it has been fetched and when.
+     *
+     * @return array<string, array{name: string, base_url: string, pages: int, fetched: int, enabled: bool, checked_at: string|null, stale: bool, configured: bool, edited: bool}>
+     */
+    #[Computed]
+    public function docSources(): array
+    {
+        $webDocs = app(WebDocs::class);
+        $sources = app(DocSources::class);
+
+        return collect($sources->all())
+            ->map(fn (array $source, string $key): array => [
+                'name' => $source['name'],
+                'base_url' => $source['base_url'],
+                'pages' => count($source['pages']),
+                'fetched' => collect($source['pages'])->filter(fn (string $page): bool => $webDocs->snapshot($key, $page) !== null)->count(),
+                'enabled' => $source['enabled'],
+                'checked_at' => $webDocs->checkedAt($key)?->diffForHumans(),
+                'stale' => $webDocs->isStale($key),
+                'configured' => $sources->isConfigured($key),
+                'edited' => $sources->isEdited($key),
+            ])
+            ->all();
+    }
+
+    /**
+     * The open source's pages and when each was last changed ('' when never fetched).
+     *
+     * @return array<string, string>
+     */
+    #[Computed]
+    public function sourcePageStatus(): array
+    {
+        $source = app(DocSources::class)->find($this->editingSource);
+
+        if ($source === null) {
+            return [];
+        }
+
+        $webDocs = app(WebDocs::class);
+
+        return collect($source['pages'])
+            ->mapWithKeys(fn (string $page): array => [$page => (string) ($webDocs->snapshot($this->editingSource, $page)['fetched_at'] ?? '')])
+            ->all();
+    }
+
+    /**
+     * The stubs, by name, with the docs pages each cites.
+     *
+     * @return array<string, array{file: string, sources: array<int, string>, content: string}>
+     */
+    #[Computed]
+    public function stubs(): array
+    {
+        return app(WebDocs::class)->stubs();
+    }
+
+    public function newSource(): void
+    {
+        $this->closeSource();
+        $this->creatingSource = true;
+    }
+
+    public function editSource(string $key): void
+    {
+        $source = app(DocSources::class)->find($key);
+
+        if ($source === null) {
+            return;
+        }
+
+        $this->resetValidation();
+        $this->creatingSource = false;
+        $this->editingSource = $key;
+        $this->sourceKey = $key;
+        $this->sourceName = $source['name'];
+        $this->sourceBaseUrl = $source['base_url'];
+        $this->sourcePages = implode("\n", $source['pages']);
+        $this->sourceEnabled = $source['enabled'];
+        unset($this->sourcePageStatus);
+    }
+
+    public function saveSource(): void
+    {
+        $this->validate([
+            'sourceKey' => ['required', 'string', 'regex:/^[a-z0-9][a-z0-9-]{0,39}$/'],
+            'sourceName' => ['required', 'string', 'max:80'],
+            'sourceBaseUrl' => ['required', 'string', 'max:255', 'starts_with:https://'],
+            'sourcePages' => ['required', 'string', 'max:10000'],
+        ], [
+            'sourceKey.regex' => 'Use lowercase letters, numbers and dashes.',
+            'sourceBaseUrl.starts_with' => 'Only https:// sites can be approved.',
+        ]);
+
+        $sources = app(DocSources::class);
+        $key = $this->creatingSource ? $this->sourceKey : $this->editingSource;
+
+        if ($this->creatingSource && $sources->find($key) !== null) {
+            $this->addError('sourceKey', 'There is already a source called '.$key.'.');
+
+            return;
+        }
+
+        try {
+            $sources->save($key, $this->sourceName, $this->sourceBaseUrl, preg_split('/\R/', $this->sourcePages) ?: [], $this->sourceEnabled);
+        } catch (InvalidArgumentException $e) {
+            $this->addError(str_starts_with($e->getMessage(), 'Not a page') ? 'sourcePages' : 'sourceBaseUrl', $e->getMessage());
+
+            return;
+        }
+
+        unset($this->docSources);
+        $this->saved('The '.$key.' docs source is saved. Refresh it to fetch its pages.');
+        $this->editSource($key);
+    }
+
+    /**
+     * Drop the open source's edit: back to config, or removed if it was added here.
+     */
+    public function resetSource(): void
+    {
+        $sources = app(DocSources::class);
+        $key = $this->editingSource;
+        $configured = $sources->isConfigured($key);
+
+        $sources->forget($key);
+
+        unset($this->docSources);
+        $this->saved($configured ? 'The '.$key.' docs source is back to its config.' : 'The '.$key.' docs source is removed.');
+        $this->closeSource();
+    }
+
+    public function closeSource(): void
+    {
+        $this->resetValidation();
+        $this->editingSource = '';
+        $this->creatingSource = false;
+        $this->sourceKey = '';
+        $this->sourceName = '';
+        $this->sourceBaseUrl = '';
+        $this->sourcePages = '';
+        $this->sourceEnabled = true;
+    }
+
+    /**
+     * Fetch one source's pages (or every enabled source's) into the snapshots now.
+     */
+    public function refreshDocs(?string $key = null): void
+    {
+        if ($key !== null && app(DocSources::class)->find($key) === null) {
+            return;
+        }
+
+        $results = collect(app(WebDocs::class)->refresh($key));
+
+        $changed = $results->sum(fn (array $result): int => count($result['changed']));
+        $unchanged = $results->sum(fn (array $result): int => count($result['unchanged']));
+        $failed = $results->flatMap(fn (array $result, string $source): array => collect($result['failed'])
+            ->map(fn (string $error, string $page): string => $source.'/'.$page.': '.$error)
+            ->values()
+            ->all());
+
+        unset($this->docSources, $this->sourcePageStatus);
+
+        Flux::toast(
+            text: "{$changed} changed, {$unchanged} unchanged".($failed->isNotEmpty() ? ', '.$failed->count().' failed. First: '.$failed->first() : '.'),
+            heading: 'Docs refreshed',
+            variant: $failed->isNotEmpty() ? 'warning' : 'success',
+        );
+    }
+
     private function saved(string $message): void
     {
         Flux::toast(text: $message, variant: 'success');
@@ -607,5 +797,128 @@ new #[Title('Agent Setup')] class extends Component
                 </div>
             </form>
         @endif
+    </flux:card>
+
+    {{-- Approved docs sites and their snapshots --}}
+    <flux:card class="space-y-4" data-test="docs-sources">
+        <div class="flex flex-wrap items-start gap-4">
+            <div class="max-w-3xl">
+                <flux:heading>Docs</flux:heading>
+                <flux:text>The agent looks things up in snapshots of these approved docs sites (<code>app/Ai/WebDocs</code>) with SearchDocs and ReadDoc, and cites the pages it used. It never fetches the web itself: only a refresh does, weekly or from here, and only the listed pages of an https site, with no redirects away from it. Edits are saved over <code>doc_sources</code> in <code>config/synthera-coder.php</code>.</flux:text>
+            </div>
+
+            <div class="ml-auto flex gap-2">
+                <flux:button size="sm" icon="arrow-path" wire:click="refreshDocs" wire:loading.attr="disabled" wire:target="refreshDocs" data-test="refresh-all-docs">Refresh all</flux:button>
+                <flux:button size="sm" variant="primary" icon="plus" wire:click="newSource" data-test="new-source">Add a site</flux:button>
+            </div>
+        </div>
+
+        <flux:table>
+            <flux:table.columns>
+                <flux:table.column>Source</flux:table.column>
+                <flux:table.column>Site</flux:table.column>
+                <flux:table.column>Pages</flux:table.column>
+                <flux:table.column>Refreshed</flux:table.column>
+                <flux:table.column></flux:table.column>
+            </flux:table.columns>
+
+            <flux:table.rows>
+                @foreach ($this->docSources as $key => $source)
+                    <flux:table.row wire:key="source-{{ $key }}" data-test="source-{{ $key }}">
+                        <flux:table.cell variant="strong">
+                            {{ $source['name'] }} <span class="font-normal text-zinc-400">{{ $key }}</span>
+                            @if (! $source['enabled'])
+                                <flux:badge size="sm" color="zinc" class="ml-1">off</flux:badge>
+                            @endif
+                            @if ($source['edited'])
+                                <flux:badge size="sm" color="amber" class="ml-1">{{ $source['configured'] ? 'edited' : 'added' }}</flux:badge>
+                            @endif
+                        </flux:table.cell>
+                        <flux:table.cell><code class="text-xs">{{ $source['base_url'] }}</code></flux:table.cell>
+                        <flux:table.cell>{{ $source['fetched'] }} / {{ $source['pages'] }}</flux:table.cell>
+                        <flux:table.cell>
+                            {{ $source['checked_at'] ?? 'Never' }}
+                            @if ($source['enabled'] && $source['stale'])
+                                <flux:badge size="sm" color="red" class="ml-1">due</flux:badge>
+                            @endif
+                        </flux:table.cell>
+                        <flux:table.cell align="end">
+                            <flux:button size="xs" variant="ghost" icon="arrow-path" wire:click="refreshDocs('{{ $key }}')" wire:loading.attr="disabled" wire:target="refreshDocs" data-test="refresh-source-{{ $key }}">Refresh</flux:button>
+                            <flux:button size="xs" variant="ghost" icon="pencil-square" wire:click="editSource('{{ $key }}')" data-test="edit-source-{{ $key }}">Edit</flux:button>
+                        </flux:table.cell>
+                    </flux:table.row>
+                @endforeach
+            </flux:table.rows>
+        </flux:table>
+
+        @if ($creatingSource || $editingSource !== '')
+            <form wire:submit="saveSource" class="space-y-4 rounded-lg border border-violet-300 p-4 dark:border-violet-700" data-test="source-editor">
+                <flux:heading size="lg">{{ $creatingSource ? 'Add a docs site' : 'The '.$editingSource.' docs source' }}</flux:heading>
+
+                <div class="grid gap-4 md:grid-cols-3">
+                    @if ($creatingSource)
+                        <flux:input wire:model="sourceKey" label="Key" description="Its folder in app/Ai/WebDocs." placeholder="e.g. pest" data-test="source-key" />
+                    @else
+                        <flux:input :value="$editingSource" label="Key" description="Its folder in app/Ai/WebDocs." disabled />
+                    @endif
+                    <flux:input wire:model="sourceName" label="Name" placeholder="e.g. Pest 4" data-test="source-name" />
+                    <flux:input wire:model="sourceBaseUrl" label="Base URL" description="https only; pages are fetched under it." placeholder="https://pestphp.com/docs/" data-test="source-base-url" />
+                </div>
+
+                <div class="grid gap-4 md:grid-cols-2">
+                    <flux:textarea wire:model="sourcePages" label="Pages" description="One path under the base URL per line, e.g. writing-tests." rows="8" class="font-mono text-sm" data-test="source-pages" />
+
+                    <div class="space-y-3">
+                        <flux:switch wire:model="sourceEnabled" label="Enabled" description="Off: not refreshed, and the agent does not read it." />
+
+                        @if ($editingSource !== '')
+                            <div>
+                                <flux:heading size="sm">Snapshots</flux:heading>
+                                <ul class="mt-1 max-h-48 space-y-0.5 overflow-auto text-xs" data-test="source-page-status">
+                                    @foreach ($this->sourcePageStatus as $page => $fetchedAt)
+                                        <li wire:key="page-status-{{ $page }}" class="flex gap-2">
+                                            <code class="grow">{{ $page }}</code>
+                                            <span @class(['text-zinc-500' => $fetchedAt !== '', 'text-red-600 dark:text-red-400' => $fetchedAt === ''])>{{ $fetchedAt !== '' ? \Illuminate\Support\Carbon::parse($fetchedAt)->toDateString() : 'not fetched' }}</span>
+                                        </li>
+                                    @endforeach
+                                </ul>
+                            </div>
+                        @endif
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-2">
+                    <flux:button type="submit" variant="primary" icon="check" data-test="save-source">Save</flux:button>
+                    <flux:button type="button" variant="ghost" wire:click="closeSource">Close</flux:button>
+                    @if ($editingSource !== '' && ($this->docSources[$editingSource]['edited'] ?? false))
+                        <flux:spacer />
+                        @if ($this->docSources[$editingSource]['configured'])
+                            <flux:button type="button" variant="ghost" icon="arrow-uturn-left" wire:click="resetSource" wire:confirm="Put the {{ $editingSource }} source back to what config says?" data-test="reset-source">Reset to config</flux:button>
+                        @else
+                            <flux:button type="button" variant="danger" icon="trash" wire:click="resetSource" wire:confirm="Remove the {{ $editingSource }} docs source? The agent stops reading it." data-test="remove-source">Remove</flux:button>
+                        @endif
+                    @endif
+                </div>
+            </form>
+        @endif
+
+        <div>
+            <flux:heading size="sm">Stubs</flux:heading>
+            <flux:text size="sm">Starting files in <code>resources/views/Ai/stubs</code> the agent copies from, each citing the docs page it follows.</flux:text>
+            <ul class="mt-2 space-y-1 text-sm" data-test="stubs">
+                @forelse ($this->stubs as $name => $stub)
+                    <li wire:key="stub-{{ $name }}" class="flex flex-wrap items-center gap-2">
+                        <code>{{ $stub['file'] }}</code>
+                        @forelse ($stub['sources'] as $url)
+                            <a href="{{ $url }}" target="_blank" rel="noopener" class="text-xs text-violet-600 hover:underline dark:text-violet-400">{{ $url }}</a>
+                        @empty
+                            <flux:badge size="sm" color="red">no source cited</flux:badge>
+                        @endforelse
+                    </li>
+                @empty
+                    <li><flux:text size="sm">No stubs yet.</flux:text></li>
+                @endforelse
+            </ul>
+        </div>
     </flux:card>
 </div>

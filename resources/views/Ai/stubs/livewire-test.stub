@@ -1,0 +1,26 @@
+<?php
+
+/*
+ * A Pest test for a Livewire 4 component. `php artisan make:livewire post.create --test`
+ * makes one beside a single-file component (resources/views/components/post/⚡create.test.php).
+ * Source: https://livewire.laravel.com/docs/4.x/testing
+ */
+
+use Livewire\Livewire;
+
+it('renders successfully', function () {
+    Livewire::test('post.create')
+        ->assertStatus(200);
+});
+
+it('title field is required', function () {
+    Livewire::test('post.create')
+        ->set('title', '')
+        ->call('save')
+        ->assertHasErrors('title');
+});
+
+it('component exists on the page', function () {
+    $this->get('/posts/create')
+        ->assertSeeLivewire('post.create');
+});

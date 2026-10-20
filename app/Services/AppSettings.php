@@ -22,6 +22,12 @@ class AppSettings
     // The profiles edited on the setup page, by name; see AgentSetup::profiles().
     public const string AGENT_PROFILES = 'agent_profiles';
 
+    // The docs sources added or edited on the setup page, by key; see DocSources::all().
+    public const string DOC_SOURCES = 'doc_sources';
+
+    // When each docs source was last refreshed, by key; see WebDocs::checkedAt().
+    public const string DOCS_CHECKED_AT = 'docs_checked_at';
+
     public function get(string $key, mixed $default = null): mixed
     {
         return Setting::query()->where('key', $key)->first()->value ?? $default;

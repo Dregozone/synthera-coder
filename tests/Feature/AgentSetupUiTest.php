@@ -136,7 +136,7 @@ test('a chat keeps the guidelines it ticks, and can go back to its mode\'s', fun
         ->assertSet('selectedGuidelines', ['laravel', 'small-models'])
         ->assertSet('guidelinesCustomized', false)
         ->set('currentChatType', 'agent')
-        ->assertSet('selectedGuidelines', ['laravel', 'tool-use', 'conventions', 'small-models'])
+        ->assertSet('selectedGuidelines', ['laravel', 'tool-use', 'docs-first', 'conventions', 'small-models'])
         ->set('selectedGuidelines', ['conventions', 'not-a-file'])
         ->assertSet('selectedGuidelines', ['conventions'])
         ->assertSet('guidelinesCustomized', true)
@@ -151,7 +151,7 @@ test('a chat keeps the guidelines it ticks, and can go back to its mode\'s', fun
 
     $page->call('resetGuidelines')
         ->assertSet('guidelinesCustomized', false)
-        ->assertSet('selectedGuidelines', ['laravel', 'tool-use', 'small-models']);
+        ->assertSet('selectedGuidelines', ['laravel', 'tool-use', 'docs-first', 'small-models']);
 
     expect($session->fresh()->guidelines)->toBeNull();
 });
@@ -188,7 +188,7 @@ test('the setup page shows the files, the defaults and what each profile loads',
         ->assertSee('data-test="file-synthera"', escape: false)
         ->assertSee('data-test="file-mentor"', escape: false)
         ->assertSee('data-test="default-soul"', escape: false)
-        ->assertSee('laravel, tool-use, conventions, small-models')
+        ->assertSee('laravel, tool-use, docs-first, conventions, small-models')
         ->assertSee(route('home', ['sessionId' => 7]), escape: false);
 });
 
@@ -272,7 +272,7 @@ test('an edited profile replaces the config one until it is reset', function ():
 
     expect($setup->selection('plan'))->toBe([
         'soul' => 'synthera',
-        'guidelines' => ['laravel', 'tool-use', 'small-models'],
+        'guidelines' => ['laravel', 'tool-use', 'docs-first', 'small-models'],
         'instructions' => ['plan', 'workspace'],
     ])
         ->and($setup->isProfileEdited('ask'))->toBeFalse();
