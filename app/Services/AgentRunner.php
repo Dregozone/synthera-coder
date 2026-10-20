@@ -5,9 +5,11 @@ namespace App\Services;
 use App\Ai\Agents\LocalAgent;
 use App\Ai\Tools\FindComposerVersion;
 use App\Ai\Tools\ListDirectory;
+use App\Ai\Tools\ReadDoc;
 use App\Ai\Tools\ReadFile;
 use App\Ai\Tools\ReadPackageJson;
 use App\Ai\Tools\RunCommand;
+use App\Ai\Tools\SearchDocs;
 use App\Ai\Tools\SearchFiles;
 use App\Ai\Tools\WriteFile;
 use App\Models\ChatMessage;
@@ -30,6 +32,7 @@ class AgentRunner
     public function __construct(
         private readonly ChatService $chatService,
         private readonly AgentSetup $agentSetup,
+        private readonly WebDocs $webDocs,
     ) {}
 
     /**
@@ -100,6 +103,8 @@ class AgentRunner
             availableTools: $this->toolsForMode($mode, $sessionId),
         );
 
+        $this->webDocs->forgetCitations($sessionId);
+
         try {
             $text = (string) $agent->ask($prompt)->text;
         } catch (Throwable $e) {
@@ -117,12 +122,30 @@ class AgentRunner
             sessionId: $sessionId,
             type: $session->current_chat_type ?: 'agent',
             by: 'assistant',
-            content: $text !== '' ? $text : '(The model returned an empty response.)',
+            content: $text !== '' ? $this->withDocSources($text, $sessionId) : '(The model returned an empty response.)',
         );
 
         if ($assignTitleFrom !== null && blank($session->title)) {
             $this->assignTitle($session, $assignTitleFrom);
         }
+    }
+
+    /**
+     * Cite the docs pages read during the turn that the reply does not already
+     * name, so every answer built on the docs says where it came from.
+     */
+    private function withDocSources(string $text, int $sessionId): string
+    {
+        $uncited = array_filter(
+            $this->webDocs->citations($sessionId),
+            fn (string $url): bool => ! str_contains($text, $url),
+        );
+
+        if ($uncited === []) {
+            return $text;
+        }
+
+        return rtrim($text)."\n\n**Sources**\n".implode("\n", array_map(fn (string $url): string => '- '.$url, $uncited));
     }
 
     /**
@@ -310,6 +333,8 @@ class AgentRunner
             new SearchFiles($sessionId),
             new ReadPackageJson($sessionId),
             new FindComposerVersion($sessionId),
+            new SearchDocs($sessionId),
+            new ReadDoc($sessionId),
         ];
     }
 

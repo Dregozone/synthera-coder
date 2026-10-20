@@ -16,6 +16,7 @@ Synthera Coder is a self-hosted web application that runs as a **sibling directo
 - [Installation](#installation)
 - [Configuration](#configuration)
   - [Agent Setup: Soul, Guidelines & Instructions](#agent-setup-soul-guidelines--instructions)
+  - [Web Docs: approved docs sites, read from snapshots](#web-docs-approved-docs-sites-read-from-snapshots)
 - [Usage](#usage)
 - [Architecture](#architecture)
 - [Contributing](#contributing)
@@ -89,6 +90,8 @@ Currently implemented tools:
 |---|---|
 | `ReadFile` | Checks whether a file exists and reads its contents, resolving paths relative to the active working directory. |
 | `FindComposerVersion` | Reads `composer.lock` in the active project and returns the installed version of any named package. |
+| `SearchDocs` | Searches the snapshots of the approved docs sites and the stubs; each hit names the doc to read and the URL to cite. See [Web Docs](#web-docs-approved-docs-sites-read-from-snapshots). |
+| `ReadDoc` | Reads one docs page or stub (or one section of it), headed by its source URL. |
 
 ### Agent Setup
 
@@ -274,6 +277,7 @@ app/Ai/Setup/
 │   ├── laravel.md      # Do things the Laravel way, tests for every change
 │   ├── tool-use.md     # Look before you change, never repeat a tool call
 │   ├── conventions.md  # Minimal changes, follow the project, no new dependencies
+│   ├── docs-first.md   # Look it up in the docs (and stubs) first, cite the source
 │   └── small-models.md # One step at a time, short replies, stop when done
 └── Instructions/   # The job at hand: a chat mode or a one-off task. Any number.
     ├── ask.md  plan.md  agent.md   # The three chat modes
@@ -292,7 +296,7 @@ Profiles in `config/synthera-coder.php` name the files (without `.md`) each agen
 
 'agent_profiles' => [
     'agent' => [
-        'guidelines' => ['laravel', 'tool-use', 'conventions', 'small-models'],
+        'guidelines' => ['laravel', 'tool-use', 'docs-first', 'conventions', 'small-models'],
         'instructions' => ['agent', 'workspace'],
     ],
     'title' => [
@@ -359,6 +363,36 @@ A name that does not match a file (or a profile that is not configured) throws, 
 | Add `Guidelines/livewire.md` ("Use Flux UI components, keep state server-side…") and list `'livewire'` in the `agent` profile | Agent-mode proposals for UI work use Flux components and Livewire properties instead of hand-written JavaScript. |
 | Edit `Instructions/title.md` to ask for an emoji first | New chats get titles like "🧪 Fix failing tests" in the sidebar. |
 
+### Web Docs: approved docs sites, read from snapshots
+
+Small local models often remember an older version of a framework (Livewire 3 rather than 4, say). So before the agent writes or plans Laravel, Livewire or Flux code, the `docs-first` guideline has it look the answer up in the docs for the versions this project uses, copy a stub where one fits, and cite the page it used.
+
+**How it stays safe:** the agent never touches the web.
+
+- **Approved sites only.** `doc_sources` in `config/synthera-coder.php` lists each site (Laravel 13, Livewire 4 and Flux UI 2 to start with) as an `https://` base URL and the page paths to take from it. A site must be a public domain name (no IP addresses, `localhost`, `.test` or ports), and a page a plain path under the base URL (no `..`, query or other host).
+- **Only a refresh fetches.** `php artisan synthera:refresh-docs [source]` (scheduled weekly, Sundays at 03:00, or **Refresh** on the setup page) fetches each listed page, follows redirects only within the same site, caps the size, keeps the article's text as markdown and writes it to `app/Ai/WebDocs/{source}/{page}.md`, headed by the URL it came from. A page that fails keeps its last snapshot; a snapshot is only rewritten when the page changed, so the git diff shows what changed upstream.
+- **The agent reads snapshots.** `SearchDocs` and `ReadDoc` (in Plan and Agent mode) search and read those files and the stubs, always with the URL to cite. Every page `ReadDoc` returns is noted, and a reply that does not mention it gets a **Sources** list added, so an answer built on the docs always says where it came from.
+
+```
+app/Ai/WebDocs/                 # Snapshots, committed so a fresh clone works offline
+├── laravel/routing.md            # Front matter with the page's url and fetched_at, then its markdown
+└── livewire/components.md
+resources/views/Ai/stubs/       # Starting files the agent copies, each citing its docs page
+├── livewire-sfc.stub             # A Livewire 4 single-file component
+├── livewire-page.stub            # A single-file component used as a page
+└── livewire-test.stub            # A Pest test for a component
+```
+
+On the setup page (`/setup`), the **Docs** card lists each source with how many of its pages have been fetched and when it was last refreshed ("due" after `SYNTHERA_DOCS_STALE_AFTER_DAYS`, default 14). **Add a site** approves another (e.g. Pest's docs) and **Edit** changes a source's pages or turns it off; like profiles, these are stored in the database over config, with **Reset to config** (or **Remove** for an added site). A stub starts with a `Source: <url>` line for each docs page it follows; the tests check every stub cites a page of an approved source.
+
+If your antivirus or a proxy re-signs HTTPS (the refresh then fails with `cURL error 60`), point `SYNTHERA_DOCS_CA_BUNDLE` at a CA bundle that includes its root certificate.
+
+| Example | Expected outcome |
+|---|---|
+| "Make a Livewire component to create a post" in Agent mode | The agent calls SearchDocs ("create component"), reads `stubs/livewire-sfc`, proposes a `⚡create.blade.php` single-file component based on it, and the reply ends with `Source: https://livewire.laravel.com/docs/4.x/components`. |
+| Add `forms` to the `livewire` source's pages and **Refresh** it | `app/Ai/WebDocs/livewire/forms.md` appears and SearchDocs finds its sections. |
+| Add a site with base URL `http://…` or `https://192.168.1.5/` | Not saved: only public `https://` sites can be approved. |
+
 ### Loading the model only when it's used
 
 Models load in LM Studio when first asked (its JIT loading) and unload after `SYNTHERA_MODEL_TTL` idle seconds (default `300`), sent as `ttl` with each request, so the GPU is free again soon after you stop. The sidebar shows **Loaded** / **Not loaded**, and **Unload now** frees it at once (through LM Studio's API, else its `lms` command).
@@ -414,12 +448,15 @@ synthera-coder/
 │   │   ├── Agents/          # One class per LLM/model combination
 │   │   ├── Sessions/        # Per-session context JSON files (gitignored in production)
 │   │   ├── Setup/           # Soul, Guidelines & Instructions markdown that make up system prompts
+│   │   ├── WebDocs/         # Markdown snapshots of the approved docs sites' pages
 │   │   └── Tools/           # Auto-discovered tool classes
 │   ├── Models/
 │   │   ├── ChatSession.php  # Persists session metadata & working directory
 │   │   └── ChatMessage.php  # Persists every message in the chat
 │   └── Services/
 │       ├── AgentSetup.php     # Composes system prompts from app/Ai/Setup
+│       ├── DocSources.php     # The approved docs sites (config + setup page edits)
+│       ├── WebDocs.php        # Refreshes, searches and reads the docs snapshots and stubs
 │       ├── ChatService.php    # Orchestrates the agentic loop
 │       ├── ContextService.php # Reads/writes per-session context files
 │       ├── FileService.php    # Resolves absolute/relative file paths

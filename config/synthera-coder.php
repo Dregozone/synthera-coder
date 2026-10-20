@@ -100,11 +100,11 @@ return [
             'instructions' => ['ask', 'workspace'],
         ],
         'plan' => [
-            'guidelines' => ['laravel', 'tool-use', 'small-models'],
+            'guidelines' => ['laravel', 'tool-use', 'docs-first', 'small-models'],
             'instructions' => ['plan', 'workspace'],
         ],
         'agent' => [
-            'guidelines' => ['laravel', 'tool-use', 'conventions', 'small-models'],
+            'guidelines' => ['laravel', 'tool-use', 'docs-first', 'conventions', 'small-models'],
             'instructions' => ['agent', 'workspace'],
         ],
         'condense' => [
@@ -116,6 +116,65 @@ return [
             'instructions' => ['title'],
         ],
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Web Docs (approved docs sites, read from snapshots)
+    |--------------------------------------------------------------------------
+    |
+    | The agent never fetches the web. `php artisan synthera:refresh-docs`
+    | (weekly, or from the setup page) fetches the listed pages of each
+    | approved source into markdown snapshots in `web_docs_path`; the SearchDocs
+    | and ReadDoc tools read only those, and the agent cites their URLs. A page
+    | is a path under its source's `base_url` (https only); a redirect may not
+    | leave the source's host. Sources edited on the setup page are stored in
+    | the database over these, like the agent profiles.
+    |
+    | `stubs_path` holds starting files (e.g. a Livewire 4 single-file
+    | component), each citing the docs page it follows on a `Source:` line.
+    |
+    */
+    'web_docs_path' => env('SYNTHERA_WEB_DOCS_PATH', app_path('Ai/WebDocs')),
+
+    'stubs_path' => resource_path('views/Ai/stubs'),
+
+    'doc_sources' => [
+        'laravel' => [
+            'name' => 'Laravel 13',
+            'base_url' => 'https://laravel.com/docs/13.x/',
+            'pages' => [
+                'structure', 'routing', 'middleware', 'controllers', 'requests', 'validation', 'blade',
+                'eloquent', 'eloquent-relationships', 'migrations', 'queues', 'artisan', 'testing', 'http-tests',
+            ],
+        ],
+        'livewire' => [
+            'name' => 'Livewire 4',
+            'base_url' => 'https://livewire.laravel.com/docs/4.x/',
+            'pages' => [
+                'components', 'pages', 'properties', 'actions', 'forms', 'validation', 'events', 'lifecycle-hooks',
+                'nesting', 'computed-properties', 'islands', 'testing', 'wire-model', 'wire-loading', 'upgrading',
+            ],
+        ],
+        'flux' => [
+            'name' => 'Flux UI 2',
+            'base_url' => 'https://fluxui.com/',
+            'pages' => [
+                'docs/installation', 'components/button', 'components/input', 'components/select',
+                'components/modal', 'components/table', 'components/card', 'components/badge', 'components/field',
+            ],
+        ],
+    ],
+
+    // Snapshots of a source not checked for this many days are shown as stale.
+    'docs_stale_after_days' => (int) env('SYNTHERA_DOCS_STALE_AFTER_DAYS', 14),
+
+    // The largest page the refresh will read (bytes), and how long it waits for one (seconds).
+    'docs_max_page_bytes' => 3 * 1024 * 1024,
+
+    'docs_timeout' => 30,
+
+    // A CA bundle for the refresh's HTTPS, for machines whose antivirus or proxy re-signs TLS.
+    'docs_ca_bundle' => env('SYNTHERA_DOCS_CA_BUNDLE'),
 
     /*
     |--------------------------------------------------------------------------

@@ -1,0 +1,20 @@
+{{--
+    A Livewire 4 page component: a single-file component used as a whole page.
+    Create with `php artisan make:livewire pages::post.create`, which makes resources/views/pages/post/⚡create.blade.php,
+    then route to it in routes/web.php: Route::livewire('/posts/create', 'pages::post.create');
+    It renders inside the layouts::app layout (resources/views/layouts/app.blade.php) unless #[Layout] says otherwise.
+    Source: https://livewire.laravel.com/docs/4.x/pages
+--}}
+<?php
+
+use Livewire\Attributes\Title;
+use Livewire\Component;
+
+new #[Title('Create post')] class extends Component {
+    public $title = '';
+};
+?>
+
+<div>
+    <h1>Create post</h1>
+</div>
