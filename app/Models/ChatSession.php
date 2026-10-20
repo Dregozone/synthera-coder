@@ -12,6 +12,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string|null $current_model
  * @property string|null $current_chat_type
  * @property string|null $current_working_directory
+ * @property string|null $soul
+ * @property array<int, string>|null $guidelines
  */
 class ChatSession extends Model
 {
@@ -25,7 +27,18 @@ class ChatSession extends Model
         'current_chat_type',
 
         'current_working_directory',
+
+        // The agent setup chosen for this chat (null: the defaults); see AgentSetup::selection()
+        'soul',
+        'guidelines',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'guidelines' => 'array',
+        ];
+    }
 
     public function messages(): HasMany
     {

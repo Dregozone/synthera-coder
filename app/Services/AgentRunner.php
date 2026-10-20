@@ -19,7 +19,7 @@ use Throwable;
 
 /**
  * Runs a single agent turn: builds a runtime-configured LocalAgent (system
- * prompt + conversation history + sandboxed tools), prompts the local model,
+ * prompt composed from app/Ai/Setup + conversation history + sandboxed tools), prompts the local model,
  * and persists the assistant's reply. Mutating tools invoked during the turn
  * record pending AgentActions that the user approves separately.
  */
@@ -27,7 +27,10 @@ class AgentRunner
 {
     private const int HISTORY_LIMIT = 30;
 
-    public function __construct(private readonly ChatService $chatService) {}
+    public function __construct(
+        private readonly ChatService $chatService,
+        private readonly AgentSetup $agentSetup,
+    ) {}
 
     /**
      * Run a turn triggered by a user chat message.
@@ -138,38 +141,30 @@ class AgentRunner
         ];
     }
 
-    private function systemPrompt(ChatSession $session): string
+    /**
+     * Compose the system prompt for the session's chat mode from the markdown
+     * files in app/Ai/Setup, as chosen by the mode's agent profile and the
+     * soul and guidelines picked for the chat.
+     */
+    public function systemPrompt(ChatSession $session): string
+    {
+        return $this->agentSetup->forProfile(self::profileFor($session), [
+            'working_directory' => (string) $session->current_working_directory,
+            'top_level' => $this->workingDirectorySummary($session->current_working_directory),
+        ], [
+            'soul' => $session->soul,
+            'guidelines' => $session->guidelines,
+        ]);
+    }
+
+    /**
+     * The agent profile for the session's chat mode (the mode's own, else agent).
+     */
+    public static function profileFor(ChatSession $session): string
     {
         $mode = $session->current_chat_type ?: 'agent';
-        $tree = $this->workingDirectorySummary($session->current_working_directory);
 
-        $base = <<<PROMPT
-        You are Synthera Coder, a careful coding assistant working on a local project, most often a Laravel application.
-
-        Working directory: {$session->current_working_directory}
-        Top-level contents: {$tree}
-        PROMPT;
-
-        $guidance = match ($mode) {
-            'ask' => <<<'PROMPT'
-
-            Mode: Ask. Answer the user's question directly and concisely. This is ordinary chat — for greetings or general questions, just reply. You do not have tools in this mode, so never claim to have inspected files.
-            PROMPT,
-            'plan' => <<<'PROMPT'
-
-            Mode: Plan. You have read-only tools (ReadFile, ListDirectory, SearchFiles, ReadPackageJson, FindComposerVersion). Use them only when they genuinely help you understand the project, then produce a clear, step-by-step plan. Do NOT modify files or run commands. Never call the same tool with the same arguments twice. If the message is a greeting or general question, just reply without using tools.
-            PROMPT,
-            default => <<<'PROMPT'
-
-            Mode: Agent. You can inspect and change the project.
-            - Read-only tools (ReadFile, ListDirectory, SearchFiles, ReadPackageJson, FindComposerVersion) run immediately.
-            - To change a file, call WriteFile with the FULL new file contents. To run a command (e.g. "php artisan test"), call RunCommand. These are proposals the user must approve — after proposing one, assume it will be applied and continue.
-            - Only use tools when they are actually needed. For a greeting or a simple question, just reply — do NOT call any tools. Never call the same tool with the same arguments twice.
-            - Keep changes minimal and follow the project's existing conventions. When finished, stop and give a short summary.
-            PROMPT,
-        };
-
-        return $base.$guidance;
+        return array_key_exists($mode, config('synthera-coder.agent_profiles', [])) ? $mode : 'agent';
     }
 
     private function workingDirectorySummary(?string $directory): string
@@ -262,9 +257,12 @@ class AgentRunner
         [$provider, $model, $timeout] = $this->resolveModel($session);
 
         try {
-            $summary = (string) (new LocalAgent(provider: $provider, model: $model, timeout: $timeout))
-                ->ask('Summarise the following conversation between a user and a coding agent into a concise brief (under 200 words) that captures decisions made, files changed, and any open tasks:'.PHP_EOL.PHP_EOL.$transcript)
-                ->text;
+            $summary = (string) (new LocalAgent(
+                provider: $provider,
+                model: $model,
+                timeout: $timeout,
+                systemInstructions: $this->agentSetup->forProfile('condense'),
+            ))->ask($transcript)->text;
         } catch (Throwable) {
             return '';
         }
@@ -322,9 +320,12 @@ class AgentRunner
         try {
             [$provider, $model, $timeout] = $this->resolveModel($session);
 
-            $generated = (new LocalAgent(provider: $provider, model: $model, timeout: $timeout))
-                ->ask('Generate a concise, descriptive title (max 5 words) for a chat that starts with this message. Return only the title, no quotes:'.PHP_EOL.$fromMessage)
-                ->text;
+            $generated = (new LocalAgent(
+                provider: $provider,
+                model: $model,
+                timeout: $timeout,
+                systemInstructions: $this->agentSetup->forProfile('title'),
+            ))->ask($fromMessage)->text;
 
             if (trim((string) $generated) !== '') {
                 $title = Str::of($generated)->trim()->limit(60)->value();
