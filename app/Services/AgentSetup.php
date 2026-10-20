@@ -15,7 +15,8 @@ use InvalidArgumentException;
  * joined in the order soul, guidelines, instructions, and `{{ placeholders }}`
  * are filled from the variables passed in. A chat can override the soul and
  * guidelines its mode's profile would load (chosen in the UI), and the files
- * themselves can be written and deleted from the setup page.
+ * and the profiles themselves can be edited from the setup page: an edited
+ * profile is stored as a setting and replaces the config one.
  */
 class AgentSetup
 {
@@ -134,7 +135,7 @@ class AgentSetup
             default => 'instructions',
         };
 
-        foreach (config('synthera-coder.agent_profiles', []) as $profile => $selection) {
+        foreach ($this->profiles() as $profile => $selection) {
             if (in_array($name, (array) ($selection[$key] ?? []), true)) {
                 $uses[] = "the {$profile} profile";
             }
@@ -162,13 +163,96 @@ class AgentSetup
     }
 
     /**
-     * The guidelines a configured profile loads.
+     * The profiles from config, each replaced by its edited version when it
+     * was changed on the setup page. Only profiles config defines exist.
+     *
+     * @return array<string, array{soul?: string|null, guidelines?: array<int, string>, instructions?: array<int, string>}>
+     */
+    public function profiles(): array
+    {
+        $profiles = config('synthera-coder.agent_profiles', []);
+        $edited = app(AppSettings::class)->get(AppSettings::AGENT_PROFILES, []);
+
+        foreach (is_array($edited) ? $edited : [] as $profile => $selection) {
+            if (array_key_exists($profile, $profiles) && is_array($selection)) {
+                $profiles[$profile] = $selection;
+            }
+        }
+
+        return $profiles;
+    }
+
+    /**
+     * Whether a profile was edited on the setup page (and so differs from config).
+     */
+    public function isProfileEdited(string $profile): bool
+    {
+        $edited = app(AppSettings::class)->get(AppSettings::AGENT_PROFILES, []);
+
+        return is_array($edited) && array_key_exists($profile, $edited);
+    }
+
+    /**
+     * Replace a profile's files. The soul is a soul's name, NO_SOUL for none,
+     * or null to use the default soul; every file must exist.
+     *
+     * @param  array<int, string>  $guidelines
+     * @param  array<int, string>  $instructions
+     */
+    public function saveProfile(string $profile, ?string $soul, array $guidelines, array $instructions): void
+    {
+        if (! array_key_exists($profile, config('synthera-coder.agent_profiles', []))) {
+            throw new InvalidArgumentException("Agent profile [{$profile}] is not configured.");
+        }
+
+        foreach ([self::GUIDELINES => $guidelines, self::INSTRUCTIONS => $instructions, self::SOUL => $soul === null || $soul === self::NO_SOUL ? [] : [$soul]] as $category => $names) {
+            foreach ($names as $name) {
+                if (! $this->exists($category, $name)) {
+                    throw new InvalidArgumentException("Agent setup file [{$category}/{$name}.md] does not exist.");
+                }
+            }
+        }
+
+        $selection = [
+            'guidelines' => array_values(array_unique($guidelines)),
+            'instructions' => array_values(array_unique($instructions)),
+        ];
+
+        if ($soul !== null) {
+            $selection = ['soul' => $soul === self::NO_SOUL ? null : $soul] + $selection;
+        }
+
+        $settings = app(AppSettings::class);
+        $edited = $settings->get(AppSettings::AGENT_PROFILES, []);
+
+        $settings->set(AppSettings::AGENT_PROFILES, [...(is_array($edited) ? $edited : []), $profile => $selection]);
+    }
+
+    /**
+     * Drop a profile's edits, so it loads what config says again.
+     */
+    public function resetProfile(string $profile): void
+    {
+        $settings = app(AppSettings::class);
+        $edited = $settings->get(AppSettings::AGENT_PROFILES, []);
+
+        if (is_array($edited)) {
+            unset($edited[$profile]);
+        }
+
+        $edited === [] || ! is_array($edited)
+            ? $settings->forget(AppSettings::AGENT_PROFILES)
+            : $settings->set(AppSettings::AGENT_PROFILES, $edited);
+    }
+
+    /**
+     * The guidelines a profile loads.
      *
      * @return array<int, string>
      */
     public function profileGuidelines(string $profile): array
     {
-        return array_values(config("synthera-coder.agent_profiles.{$profile}.guidelines", []));
+        return array_values($this->profiles()[$profile]['guidelines'] ?? []);
     }
 
     /**
@@ -220,7 +304,7 @@ class AgentSetup
      */
     public function selection(string $profile, array $overrides = []): array
     {
-        $profiles = config('synthera-coder.agent_profiles', []);
+        $profiles = $this->profiles();
 
         if (! array_key_exists($profile, $profiles)) {
             throw new InvalidArgumentException("Agent profile [{$profile}] is not configured.");

@@ -309,7 +309,8 @@ A profile without a `soul` key uses `default_soul`; `'soul' => 'mentor'` overrid
 
 - **Per chat:** the soul picker in the composer, or **Agent → Configure** in the sidebar, sets this chat's soul (or the default, or none) and ticks its guidelines. Until you change them, a chat's guidelines follow its mode's profile; once changed they stay with the chat (**Use the mode's** goes back). Changes apply from the next message. **Preview** shows the system prompt the next turn will send.
 - **Defaults:** the setup page (`/setup`, or **Agent → Setup files**) sets the soul, mode and model new chats start with. These are stored in the database and override `default_soul`, `default_chat_type` and `default_chat_model`; choose "From config" for the soul to go back to `.env`.
-- **Files:** the setup page lists each folder's files with a one-line description, and creates, edits and deletes them. A file a profile or the default soul needs can't be deleted; a chat that picked a deleted soul or guideline falls back to its defaults. Profiles themselves stay in config.
+- **Files:** the setup page lists each folder's files with a one-line description, and creates, edits and deletes them. A file a profile or the default soul needs can't be deleted; a chat that picked a deleted soul or guideline falls back to its defaults.
+- **Profiles:** the setup page's Profiles table edits what each profile loads (soul, guidelines, instructions, and the order they are joined in), with a preview of the resulting prompt. An edited profile is stored in the database over its `agent_profiles` entry and marked "edited"; **Reset to config** drops the edit. Only the profiles config defines can be edited.
 
 #### Placeholders
 

@@ -8,8 +8,8 @@ use App\Models\Setting;
  * The app-wide defaults chosen on the setup page: the soul, chat mode and model
  * new chats start with. Each falls back to its value in
  * `config/synthera-coder.php` until one is chosen, or when the chosen one no
- * longer exists (a model removed from config). The soul is resolved by
- * AgentSetup::defaultSoul(), which knows which soul files exist.
+ * longer exists (a model removed from config). The soul and the edited
+ * profiles are resolved by AgentSetup, which knows which files exist.
  */
 class AppSettings
 {
@@ -18,6 +18,9 @@ class AppSettings
     public const string DEFAULT_CHAT_TYPE = 'default_chat_type';
 
     public const string DEFAULT_CHAT_MODEL = 'default_chat_model';
+
+    // The profiles edited on the setup page, by name; see AgentSetup::profiles().
+    public const string AGENT_PROFILES = 'agent_profiles';
 
     public function get(string $key, mixed $default = null): mixed
     {

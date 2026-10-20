@@ -35,6 +35,18 @@ new #[Title('Agent Setup')] class extends Component
 
     public string $content = '';
 
+    // The profile open in the profile editor ('' when none), and its choices:
+    // the soul is '' for the default soul, AgentSetup::NO_SOUL for none, or a soul's name.
+    public string $editingProfile = '';
+
+    public string $profileSoul = '';
+
+    public array $profileGuidelines = [];
+
+    public array $profileInstructions = [];
+
+    public bool $showProfilePreview = false;
+
     public function mount(AppSettings $settings): void
     {
         if (! in_array($this->category, AgentSetup::CATEGORIES, true)) {
@@ -66,16 +78,148 @@ new #[Title('Agent Setup')] class extends Component
     }
 
     /**
-     * Every configured profile and the files it loads (without a chat's overrides).
+     * Every profile and the files it loads (without a chat's overrides), with
+     * whether its soul is the default one and whether it was edited here.
      *
-     * @return array<string, array{soul: string|null, guidelines: array<int, string>, instructions: array<int, string>}>
+     * @return array<string, array{soul: string|null, default_soul: bool, guidelines: array<int, string>, instructions: array<int, string>, edited: bool}>
      */
     #[Computed]
     public function profiles(): array
     {
-        return collect(array_keys(config('synthera-coder.agent_profiles', [])))
-            ->mapWithKeys(fn (string $profile): array => [$profile => $this->setup()->selection($profile)])
+        $setup = $this->setup();
+
+        return collect($setup->profiles())
+            ->map(fn (array $selection, string $profile): array => [
+                ...$setup->selection($profile),
+                'default_soul' => ! array_key_exists('soul', $selection),
+                'edited' => $setup->isProfileEdited($profile),
+            ])
             ->all();
+    }
+
+    /**
+     * The files a category offers, for the profile editor.
+     *
+     * @return array<int, string>
+     */
+    public function optionsFor(string $category): array
+    {
+        return $this->setup()->options($category);
+    }
+
+    #[Computed]
+    public function currentDefaultSoul(): ?string
+    {
+        return $this->setup()->defaultSoul();
+    }
+
+    /**
+     * The open profile's prompt as it stands in the editor, placeholders unfilled.
+     */
+    #[Computed]
+    public function profilePreview(): string
+    {
+        return $this->setup()->compose([
+            'soul' => match ($this->profileSoul) {
+                '' => $this->currentDefaultSoul,
+                AgentSetup::NO_SOUL => null,
+                default => $this->profileSoul,
+            },
+            'guidelines' => $this->profileGuidelines,
+            'instructions' => $this->profileInstructions,
+        ]);
+    }
+
+    public function editProfile(string $profile): void
+    {
+        $profiles = $this->setup()->profiles();
+
+        if (! array_key_exists($profile, $profiles)) {
+            return;
+        }
+
+        $selection = $profiles[$profile];
+
+        $this->resetValidation();
+        $this->editingProfile = $profile;
+        $this->profileSoul = match (true) {
+            ! array_key_exists('soul', $selection) => '',
+            $selection['soul'] === null => AgentSetup::NO_SOUL,
+            default => (string) $selection['soul'],
+        };
+        $this->profileGuidelines = array_values($selection['guidelines'] ?? []);
+        $this->profileInstructions = array_values($selection['instructions'] ?? []);
+        $this->showProfilePreview = false;
+    }
+
+    /**
+     * Move a guideline or an instruction earlier (-1) or later (1): they are
+     * joined in this order.
+     */
+    public function moveInProfile(string $list, int $index, int $direction): void
+    {
+        if (! in_array($list, ['profileGuidelines', 'profileInstructions'], true)) {
+            return;
+        }
+
+        $items = array_values($this->{$list});
+        $target = $index + $direction;
+
+        if (! isset($items[$index], $items[$target])) {
+            return;
+        }
+
+        [$items[$index], $items[$target]] = [$items[$target], $items[$index]];
+        $this->{$list} = $items;
+    }
+
+    public function saveProfile(): void
+    {
+        $this->validate([
+            'profileInstructions' => ['required', 'array', 'min:1'],
+        ], [
+            'profileInstructions.required' => 'Pick at least one instruction: it is the task the agent is given.',
+            'profileInstructions.min' => 'Pick at least one instruction: it is the task the agent is given.',
+        ]);
+
+        try {
+            $this->setup()->saveProfile(
+                $this->editingProfile,
+                $this->profileSoul === '' ? null : $this->profileSoul,
+                array_values($this->profileGuidelines),
+                array_values($this->profileInstructions),
+            );
+        } catch (InvalidArgumentException $e) {
+            Flux::toast(text: $e->getMessage(), heading: 'Not saved', variant: 'danger');
+
+            return;
+        }
+
+        unset($this->profiles, $this->files);
+        $this->saved('The '.$this->editingProfile.' profile is saved.');
+        $this->closeProfile();
+    }
+
+    /**
+     * Go back to what config says for the open profile.
+     */
+    public function resetProfile(): void
+    {
+        $this->setup()->resetProfile($this->editingProfile);
+
+        unset($this->profiles, $this->files);
+        $this->saved('The '.$this->editingProfile.' profile is back to its config.');
+        $this->closeProfile();
+    }
+
+    public function closeProfile(): void
+    {
+        $this->resetValidation();
+        $this->editingProfile = '';
+        $this->profileSoul = '';
+        $this->profileGuidelines = [];
+        $this->profileInstructions = [];
+        $this->showProfilePreview = false;
     }
 
     /**
@@ -353,11 +497,11 @@ new #[Title('Agent Setup')] class extends Component
         </div>
     </flux:card>
 
-    {{-- What each profile loads --}}
+    {{-- What each profile loads, editable --}}
     <flux:card class="space-y-4">
         <div>
             <flux:heading>Profiles</flux:heading>
-            <flux:text>Which files each kind of call loads by default. Each chat mode uses the profile of its name; a chat's own soul and guidelines replace these. Profiles are set in <code>config/synthera-coder.php</code> (<code>agent_profiles</code>).</flux:text>
+            <flux:text>Which files each kind of call loads. Each chat mode uses the profile of its name; <code>condense</code> summarises a long chat and <code>title</code> names a new one. A chat's own soul and guidelines replace its mode's. Edits here are saved over <code>agent_profiles</code> in <code>config/synthera-coder.php</code> until you reset them.</flux:text>
         </div>
 
         <flux:table>
@@ -366,18 +510,102 @@ new #[Title('Agent Setup')] class extends Component
                 <flux:table.column>Soul</flux:table.column>
                 <flux:table.column>Guidelines</flux:table.column>
                 <flux:table.column>Instructions</flux:table.column>
+                <flux:table.column></flux:table.column>
             </flux:table.columns>
 
             <flux:table.rows>
                 @foreach ($this->profiles as $profile => $selection)
-                    <flux:table.row wire:key="profile-{{ $profile }}">
-                        <flux:table.cell variant="strong">{{ $profile }}</flux:table.cell>
-                        <flux:table.cell>{{ $selection['soul'] ?? '—' }}</flux:table.cell>
+                    <flux:table.row wire:key="profile-{{ $profile }}" data-test="profile-{{ $profile }}">
+                        <flux:table.cell variant="strong">
+                            {{ $profile }}
+                            @if ($selection['edited'])
+                                <flux:badge size="sm" color="amber" class="ml-1">edited</flux:badge>
+                            @endif
+                        </flux:table.cell>
+                        <flux:table.cell>{{ $selection['soul'] ?? '—' }}{{ $selection['default_soul'] && $selection['soul'] ? ' (default)' : '' }}</flux:table.cell>
                         <flux:table.cell>{{ implode(', ', $selection['guidelines']) ?: '—' }}</flux:table.cell>
                         <flux:table.cell>{{ implode(', ', $selection['instructions']) ?: '—' }}</flux:table.cell>
+                        <flux:table.cell align="end">
+                            <flux:button size="xs" variant="ghost" icon="pencil-square" wire:click="editProfile('{{ $profile }}')" data-test="edit-profile-{{ $profile }}">Edit</flux:button>
+                        </flux:table.cell>
                     </flux:table.row>
                 @endforeach
             </flux:table.rows>
         </flux:table>
+
+        @if ($editingProfile !== '')
+            <form wire:submit="saveProfile" class="space-y-6 rounded-lg border border-violet-300 p-4 dark:border-violet-700" data-test="profile-editor">
+                <div class="flex items-center gap-2">
+                    <flux:heading size="lg">The {{ $editingProfile }} profile</flux:heading>
+                    @if ($this->profiles[$editingProfile]['edited'] ?? false)
+                        <flux:badge size="sm" color="amber">edited</flux:badge>
+                    @endif
+                </div>
+
+                <div class="grid gap-6 md:grid-cols-3">
+                    <flux:radio.group wire:model.live="profileSoul" label="Soul" description="A chat can still pick its own.">
+                        <flux:radio value="" label="The default soul{{ $this->currentDefaultSoul ? ' ('.$this->currentDefaultSoul.')' : '' }}" />
+                        @foreach ($this->optionsFor(\App\Services\AgentSetup::SOUL) as $soul)
+                            <flux:radio wire:key="profile-soul-{{ $soul }}" :value="$soul" :label="$soul" />
+                        @endforeach
+                        <flux:radio value="{{ \App\Services\AgentSetup::NO_SOUL }}" label="No soul" />
+                    </flux:radio.group>
+
+                    <flux:checkbox.group wire:model.live="profileGuidelines" label="Guidelines" description="Rules it keeps. A chat can tick its own.">
+                        @foreach ($this->optionsFor(\App\Services\AgentSetup::GUIDELINES) as $guideline)
+                            <flux:checkbox wire:key="profile-guideline-{{ $guideline }}" :value="$guideline" :label="$guideline" />
+                        @endforeach
+                    </flux:checkbox.group>
+
+                    <div>
+                        <flux:checkbox.group wire:model.live="profileInstructions" label="Instructions" description="The task. Keep workspace in the chat modes: it tells the agent which project it is in.">
+                            @foreach ($this->optionsFor(\App\Services\AgentSetup::INSTRUCTIONS) as $instruction)
+                                <flux:checkbox wire:key="profile-instruction-{{ $instruction }}" :value="$instruction" :label="$instruction" />
+                            @endforeach
+                        </flux:checkbox.group>
+                        <flux:error name="profileInstructions" />
+                    </div>
+                </div>
+
+                {{-- The order they are joined in --}}
+                <div class="grid gap-6 md:grid-cols-2">
+                    @foreach (['profileGuidelines' => 'Guideline order', 'profileInstructions' => 'Instruction order'] as $list => $heading)
+                        <div wire:key="order-{{ $list }}">
+                            <flux:heading size="sm">{{ $heading }}</flux:heading>
+                            <ol class="mt-2 space-y-1">
+                                @forelse (array_values($this->{$list}) as $index => $item)
+                                    <li wire:key="order-{{ $list }}-{{ $item }}" class="flex items-center gap-2 rounded-md border border-zinc-200 px-2 py-1 text-sm dark:border-zinc-700">
+                                        <span class="w-5 text-zinc-400">{{ $index + 1 }}.</span>
+                                        <span class="grow">{{ $item }}</span>
+                                        <flux:button size="xs" variant="ghost" icon="chevron-up" wire:click="moveInProfile('{{ $list }}', {{ $index }}, -1)" :disabled="$index === 0" />
+                                        <flux:button size="xs" variant="ghost" icon="chevron-down" wire:click="moveInProfile('{{ $list }}', {{ $index }}, 1)" :disabled="$index === count($this->{$list}) - 1" />
+                                    </li>
+                                @empty
+                                    <li><flux:text size="sm">None.</flux:text></li>
+                                @endforelse
+                            </ol>
+                        </div>
+                    @endforeach
+                </div>
+
+                <div>
+                    <flux:button size="xs" variant="ghost" :icon="$showProfilePreview ? 'eye-slash' : 'eye'" wire:click="$toggle('showProfilePreview')" data-test="toggle-profile-preview">
+                        {{ $showProfilePreview ? 'Hide the prompt' : 'Preview the prompt' }}
+                    </flux:button>
+                    @if ($showProfilePreview)
+                        <pre class="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-zinc-100 p-3 text-xs leading-snug dark:bg-zinc-900" data-test="profile-preview">{{ $this->profilePreview }}</pre>
+                    @endif
+                </div>
+
+                <div class="flex items-center gap-2">
+                    <flux:button type="submit" variant="primary" icon="check" data-test="save-profile">Save profile</flux:button>
+                    <flux:button type="button" variant="ghost" wire:click="closeProfile">Close</flux:button>
+                    @if ($this->profiles[$editingProfile]['edited'] ?? false)
+                        <flux:spacer />
+                        <flux:button type="button" variant="ghost" icon="arrow-uturn-left" wire:click="resetProfile" wire:confirm="Put the {{ $editingProfile }} profile back to what config says?" data-test="reset-profile">Reset to config</flux:button>
+                    @endif
+                </div>
+            </form>
+        @endif
     </flux:card>
 </div>

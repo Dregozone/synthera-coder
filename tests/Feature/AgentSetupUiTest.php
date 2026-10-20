@@ -248,3 +248,116 @@ test('the setup page will not delete a file a profile or the default soul needs'
 
     expect(File::exists(setupFile(AgentSetup::SOUL, 'synthera')))->toBeTrue();
 });
+
+test('an edited profile replaces the config one until it is reset', function (): void {
+    $setup = app(AgentSetup::class);
+
+    $setup->saveProfile('plan', 'mentor', ['laravel'], ['workspace', 'plan']);
+    $setup->saveProfile('ask', AgentSetup::NO_SOUL, [], ['ask']);
+
+    expect($setup->selection('plan'))->toBe(['soul' => 'mentor', 'guidelines' => ['laravel'], 'instructions' => ['workspace', 'plan']])
+        ->and($setup->selection('ask')['soul'])->toBeNull()
+        ->and($setup->isProfileEdited('plan'))->toBeTrue()
+        ->and($setup->isProfileEdited('agent'))->toBeFalse()
+        ->and($setup->profileGuidelines('plan'))->toBe(['laravel'])
+        ->and($setup->usedBy(AgentSetup::SOUL, 'mentor'))->toBe(['the plan profile'])
+        ->and($setup->forProfile('plan'))->toStartWith($setup->load(AgentSetup::SOUL, 'mentor'));
+
+    // A soul of null goes back to the default soul.
+    $setup->saveProfile('plan', null, [], ['plan']);
+    expect($setup->selection('plan')['soul'])->toBe('synthera');
+
+    $setup->resetProfile('plan');
+    $setup->resetProfile('ask');
+
+    expect($setup->selection('plan'))->toBe([
+        'soul' => 'synthera',
+        'guidelines' => ['laravel', 'tool-use', 'small-models'],
+        'instructions' => ['plan', 'workspace'],
+    ])
+        ->and($setup->isProfileEdited('ask'))->toBeFalse();
+});
+
+test('a profile is only saved when it is configured and its files exist', function (string $profile, ?string $soul, array $guidelines, array $instructions): void {
+    app(AgentSetup::class)->saveProfile($profile, $soul, $guidelines, $instructions);
+})->throws(InvalidArgumentException::class)->with([
+    'unknown profile' => ['nope', null, [], ['ask']],
+    'missing soul' => ['ask', 'gone', [], ['ask']],
+    'missing guideline' => ['ask', null, ['gone'], ['ask']],
+    'bad instruction' => ['ask', null, [], ['../ask']],
+]);
+
+test('a file an edited profile no longer uses can be deleted', function (): void {
+    $setup = app(AgentSetup::class);
+
+    expect($setup->usedBy(AgentSetup::GUIDELINES, 'small-models'))->not->toBe([]);
+
+    foreach (['ask', 'plan', 'agent'] as $profile) {
+        $selection = $setup->selection($profile);
+        $setup->saveProfile($profile, null, array_values(array_diff($selection['guidelines'], ['small-models'])), $selection['instructions']);
+    }
+
+    expect($setup->usedBy(AgentSetup::GUIDELINES, 'small-models'))->toBe([]);
+});
+
+test('the chat runs with the edited profile of its mode', function (): void {
+    LocalAgent::fake(['Done.', 'A Title']);
+
+    app(AgentSetup::class)->saveProfile('ask', 'terse', ['conventions'], ['ask']);
+
+    $session = ChatSession::create(['current_working_directory' => base_path(), 'current_model' => 'qwen/qwen3.5-9b', 'current_chat_type' => 'ask']);
+    $message = ChatMessage::create(['chat_session_id' => $session->id, 'type' => 'ask', 'by' => 'user', 'content' => 'Hi']);
+
+    Livewire::test('pages::chat', ['sessionId' => $session->id])
+        ->assertSet('selectedGuidelines', ['conventions']);
+
+    app(AgentRunner::class)->runForUserMessage($session->id, $message->id);
+
+    LocalAgent::assertPrompted(function (AgentPrompt $prompt): bool {
+        $instructions = (string) $prompt->agent->instructions();
+
+        return str_contains($instructions, 'terse mode')
+            && str_contains($instructions, '# Project conventions')
+            && ! str_contains($instructions, '# Laravel guidelines')
+            && ! str_contains($instructions, 'Working directory:');
+    });
+});
+
+test('the setup page edits, reorders, previews and resets a profile', function (): void {
+    $page = Livewire::test('pages::agent-setup')
+        ->call('editProfile', 'agent')
+        ->assertSee('data-test="profile-editor"', escape: false)
+        ->assertSet('profileSoul', '')
+        ->assertSet('profileInstructions', ['agent', 'workspace'])
+        ->set('profileSoul', 'mentor')
+        ->set('profileGuidelines', ['laravel', 'conventions'])
+        ->call('moveInProfile', 'profileGuidelines', 1, -1)
+        ->assertSet('profileGuidelines', ['conventions', 'laravel'])
+        ->call('moveInProfile', 'profileGuidelines', 0, -1)
+        ->assertSet('profileGuidelines', ['conventions', 'laravel'])
+        ->call('moveInProfile', 'content', 0, 1)
+        ->set('showProfilePreview', true)
+        ->assertSee('data-test="profile-preview"', escape: false)
+        ->assertSee('mentor mode')
+        ->set('profileInstructions', [])
+        ->call('saveProfile')
+        ->assertHasErrors('profileInstructions')
+        ->set('profileInstructions', ['agent', 'workspace'])
+        ->call('saveProfile')
+        ->assertHasNoErrors()
+        ->assertSet('editingProfile', '')
+        ->assertSee('edited');
+
+    expect(app(AgentSetup::class)->selection('agent'))->toBe([
+        'soul' => 'mentor',
+        'guidelines' => ['conventions', 'laravel'],
+        'instructions' => ['agent', 'workspace'],
+    ]);
+
+    $page->call('editProfile', 'agent')
+        ->assertSet('profileSoul', 'mentor')
+        ->assertSee('data-test="reset-profile"', escape: false)
+        ->call('resetProfile');
+
+    expect(app(AgentSetup::class)->isProfileEdited('agent'))->toBeFalse();
+});
