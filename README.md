@@ -15,6 +15,7 @@ Synthera Coder is a self-hosted web application that runs as a **sibling directo
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
 - [Configuration](#configuration)
+  - [Agent Setup: Soul, Guidelines & Instructions](#agent-setup-soul-guidelines--instructions)
 - [Usage](#usage)
 - [Architecture](#architecture)
 - [Contributing](#contributing)
@@ -88,6 +89,10 @@ Currently implemented tools:
 |---|---|
 | `ReadFile` | Checks whether a file exists and reads its contents, resolving paths relative to the active working directory. |
 | `FindComposerVersion` | Reads `composer.lock` in the active project and returns the installed version of any named package. |
+
+### Agent Setup
+
+How the agent behaves and sounds lives in plain markdown files in `app/Ai/Setup/` — a **Soul** (persona), **Guidelines** (standing rules) and **Instructions** (the task) — chosen per mode in config. Change the agent's behaviour by editing a markdown file, not PHP. See [Agent Setup: Soul, Guidelines & Instructions](#agent-setup-soul-guidelines--instructions).
 
 ### Model Selection
 
@@ -255,6 +260,96 @@ return [
 ];
 ```
 
+### Agent Setup: Soul, Guidelines & Instructions
+
+Every system prompt the agent receives is composed from markdown files in `app/Ai/Setup/`. Each folder can hold as many files as you like; each file is one option an agent can load.
+
+```
+app/Ai/Setup/
+├── Soul/           # Who the agent is: tone, temperament, honesty. One per prompt.
+│   ├── synthera.md   # Default — calm, direct pair programmer
+│   ├── mentor.md     # Explains the "why", names conventions, teaches
+│   └── terse.md      # Answer only, bullet points and code
+├── Guidelines/     # Standing rules that hold whatever the task. Any number.
+│   ├── laravel.md      # Do things the Laravel way, tests for every change
+│   ├── tool-use.md     # Look before you change, never repeat a tool call
+│   ├── conventions.md  # Minimal changes, follow the project, no new dependencies
+│   └── small-models.md # One step at a time, short replies, stop when done
+└── Instructions/   # The job at hand: a chat mode or a one-off task. Any number.
+    ├── ask.md  plan.md  agent.md   # The three chat modes
+    ├── condense.md  title.md       # Summarising a conversation, titling a chat
+    └── workspace.md                # The project's working directory and contents
+```
+
+A prompt is built in the order **soul → guidelines → instructions**, so identity comes first, then the rules, then the task and its context — the order that works best for small local models, which pay most attention to the start and end of a prompt.
+
+#### Choosing what each agent loads
+
+Profiles in `config/synthera-coder.php` name the files (without `.md`) each agent loads. The chat modes use the profile of the same name; `condense` and `title` are used for summarising and titling:
+
+```php
+'default_soul' => env('SYNTHERA_SOUL', 'synthera'),
+
+'agent_profiles' => [
+    'agent' => [
+        'guidelines' => ['laravel', 'tool-use', 'conventions', 'small-models'],
+        'instructions' => ['agent', 'workspace'],
+    ],
+    'title' => [
+        'soul' => null,            // no persona for a one-line utility task
+        'instructions' => ['title'],
+    ],
+    // ask, plan, condense ...
+],
+```
+
+A profile without a `soul` key uses `default_soul`; `'soul' => 'mentor'` overrides it for that profile; `'soul' => null` loads none.
+
+#### Placeholders
+
+Files may contain `{{ placeholders }}`, filled in when the prompt is built. The chat modes pass `{{ working_directory }}` and `{{ top_level }}` (the project's top-level files and folders), used by `Instructions/workspace.md`. Unknown placeholders are left as they are.
+
+#### Using it from code
+
+```php
+use App\Services\AgentSetup;
+
+$setup = app(AgentSetup::class);
+
+// A configured profile
+$setup->forProfile('plan', ['working_directory' => $dir, 'top_level' => 'app/, routes/']);
+
+// Or an explicit selection
+$setup->compose([
+    'soul' => 'mentor',
+    'guidelines' => ['laravel'],
+    'instructions' => ['plan'],
+]);
+
+$setup->options(AgentSetup::SOUL); // ['mentor', 'synthera', 'terse']
+```
+
+A name that does not match a file (or a profile that is not configured) throws, so a typo in config fails loudly rather than silently dropping part of the prompt.
+
+#### Writing good setup files
+
+- **One concern per file.** A guideline about tests and one about tool use are two files, so agents can take one without the other.
+- **Short, imperative bullets.** Local 4–9B models follow "Read a file before you rewrite it" far better than paragraphs of explanation.
+- **Say what to do, and the one thing never to do.** Positive instructions with a clear boundary ("Do NOT modify files in this mode") beat long lists of prohibitions.
+- **Put identity in the soul, rules in guidelines, the task in instructions.** Keep a persona out of instructions so you can swap it without touching how a mode works.
+- **Start each file with a `#` heading** so the composed prompt reads as clear, separate sections.
+
+#### Examples and expected outcomes
+
+| Change | Expected outcome |
+|---|---|
+| Set `SYNTHERA_SOUL=mentor` in `.env` | In every mode the agent explains why it is making each change, names the Laravel convention involved, and suggests a small next step for you to try. |
+| Set `SYNTHERA_SOUL=terse` | Replies shrink to bullet points and code with no preamble or recap — useful once you trust the agent and want speed. |
+| Add `'soul' => 'mentor'` to the `plan` profile only | Plans come with explanations for learning; Agent mode stays brief and practical. |
+| Remove `small-models` from the `agent` profile's guidelines | Larger models give longer, more exploratory answers; small models are more likely to ramble or repeat tool calls. |
+| Add `Guidelines/livewire.md` ("Use Flux UI components, keep state server-side…") and list `'livewire'` in the `agent` profile | Agent-mode proposals for UI work use Flux components and Livewire properties instead of hand-written JavaScript. |
+| Edit `Instructions/title.md` to ask for an emoji first | New chats get titles like "🧪 Fix failing tests" in the sidebar. |
+
 ### Loading the model only when it's used
 
 Models load in LM Studio when first asked (its JIT loading) and unload after `SYNTHERA_MODEL_TTL` idle seconds (default `300`), sent as `ttl` with each request, so the GPU is free again soon after you stop. The sidebar shows **Loaded** / **Not loaded**, and **Unload now** frees it at once (through LM Studio's API, else its `lms` command).
@@ -309,11 +404,13 @@ synthera-coder/
 │   ├── Ai/
 │   │   ├── Agents/          # One class per LLM/model combination
 │   │   ├── Sessions/        # Per-session context JSON files (gitignored in production)
+│   │   ├── Setup/           # Soul, Guidelines & Instructions markdown that make up system prompts
 │   │   └── Tools/           # Auto-discovered tool classes
 │   ├── Models/
 │   │   ├── ChatSession.php  # Persists session metadata & working directory
 │   │   └── ChatMessage.php  # Persists every message in the chat
 │   └── Services/
+│       ├── AgentSetup.php     # Composes system prompts from app/Ai/Setup
 │       ├── ChatService.php    # Orchestrates the agentic loop
 │       ├── ContextService.php # Reads/writes per-session context files
 │       ├── FileService.php    # Resolves absolute/relative file paths

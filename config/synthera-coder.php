@@ -79,6 +79,46 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Agent Setup (Soul, Guidelines, Instructions)
+    |--------------------------------------------------------------------------
+    |
+    | System prompts are composed from markdown files in `setup_path`, which
+    | holds a `Soul`, `Guidelines` and `Instructions` folder. Each profile
+    | names the files (without `.md`) an agent loads, joined in that order;
+    | `{{ placeholders }}` in them are filled in at run time. A profile with
+    | no `soul` key uses `default_soul`; `'soul' => null` loads none. The
+    | chat modes (ask / plan / agent) use the profile of the same name.
+    |
+    */
+    'setup_path' => app_path('Ai/Setup'),
+
+    'default_soul' => env('SYNTHERA_SOUL', 'synthera'),
+
+    'agent_profiles' => [
+        'ask' => [
+            'guidelines' => ['laravel', 'small-models'],
+            'instructions' => ['ask', 'workspace'],
+        ],
+        'plan' => [
+            'guidelines' => ['laravel', 'tool-use', 'small-models'],
+            'instructions' => ['plan', 'workspace'],
+        ],
+        'agent' => [
+            'guidelines' => ['laravel', 'tool-use', 'conventions', 'small-models'],
+            'instructions' => ['agent', 'workspace'],
+        ],
+        'condense' => [
+            'soul' => null,
+            'instructions' => ['condense'],
+        ],
+        'title' => [
+            'soul' => null,
+            'instructions' => ['title'],
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Project Commands
     |--------------------------------------------------------------------------
     |
