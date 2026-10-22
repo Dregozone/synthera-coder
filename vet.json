@@ -502,6 +502,10 @@
             "version": "v1.2.7",
             "hash": "tree-v2:6ffc8a88f56b9b5082de7e1d3c620a64fa6224f3d2ccd94c23b7b73ec903929b"
         },
+        "laravel/pao": {
+            "version": "v1.1.5",
+            "hash": "tree-v2:f9d02c17b11ad280b6feb8753ff85b622573870aa21aa26ab8d126d9549c0a52"
+        },
         "laravel/pint": {
             "version": "v1.29.1",
             "hash": "tree-v2:e9a598bd519de65e0ef1add4e62caa2efb4c444bdbe44f2feab5ec859d58118b"
@@ -529,10 +533,6 @@
         "nunomaduro/collision": {
             "version": "v8.9.5",
             "hash": "tree-v2:937038b0d056a8bcf7697a75ce737986eccb501a325645cf05d679e7befcf39e"
-        },
-        "nunomaduro/pao": {
-            "version": "v1.0.6",
-            "hash": "tree-v2:3a58bc7abbcedb58c7e39ae5c81dcac7feacbf391fb9a5ed312918bccf2c7a11"
         },
         "pestphp/pest": {
             "version": "v5.3.3",
