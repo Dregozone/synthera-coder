@@ -34,7 +34,7 @@ class AgentSetup
      */
     public const string NO_SOUL = ':none';
 
-    public function __construct(private ?string $path = null) {}
+    public function __construct(private readonly ?string $path = null) {}
 
     /**
      * The names (file names without `.md`) of the files available in a category.

@@ -33,6 +33,7 @@ class ChatSession extends Model
         'guidelines',
     ];
 
+    #[\Override]
     protected function casts(): array
     {
         return [

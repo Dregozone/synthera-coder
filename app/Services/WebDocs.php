@@ -502,7 +502,7 @@ class WebDocs
     {
         $cited = (new ContextService($chatSessionId))->get('docs_cited', []);
 
-        return is_array($cited) ? array_values(array_filter($cited, 'is_string')) : [];
+        return is_array($cited) ? array_values(array_filter($cited, is_string(...))) : [];
     }
 
     public function forgetCitations(int $chatSessionId): void
