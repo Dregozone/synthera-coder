@@ -77,8 +77,8 @@
             "hash": "tree-v2:d435808864b06da3245efe0839715548de7aaed7ef69113eea464aff08dffcd1"
         },
         "laravel/fortify": {
-            "version": "v1.37.2",
-            "hash": "tree-v2:117d25d31b2e34854ac589e4c42013a4173ca104717a2547aa85e816bf0eae3a"
+            "version": "v1.41.0",
+            "hash": "tree-v2:c83c0f5adf29f804a91b34c62798f3daa71152a6b0ba5b89859224f93067d250"
         },
         "laravel/framework": {
             "version": "v13.38.0",
@@ -133,16 +133,16 @@
             "hash": "tree-v2:b049e358e38d8c94edb1c824c9c6f12b2cdd0b6858e53084e1035d60ecaf3f93"
         },
         "livewire/flux": {
-            "version": "v2.14.1",
-            "hash": "tree-v2:5b8dde4e482daa13f66f7af230e612e634066920058ec12018f95654cb976616"
+            "version": "v2.21.0",
+            "hash": "tree-v2:096f3aacc885563aa37709e2351ec48ea8b9ace0bcc1c76f4728f34ebca7c69f"
         },
         "livewire/flux-pro": {
-            "version": "2.14.1",
-            "hash": "tree-v2:59d976250a5926bc9301e28380106ba73df4e845fdfccfdb8fd71626e0c412df"
+            "version": "2.21.0",
+            "hash": "tree-v2:bbc7dc0b1133e3d6136202c2c214098b26eda62c2900496079e70c58b22a2fb5"
         },
         "livewire/livewire": {
-            "version": "v4.4.7",
-            "hash": "tree-v2:7854e9ca41046df8c09478b95e36de3cc6db43b7035d24ecc15ca1b4297657c1"
+            "version": "v4.4.8",
+            "hash": "tree-v2:ba227b9c0fa25ee3d5ea715216a41bf70d845016dbf25a3cb2cde91e7e4b3014"
         },
         "monolog/monolog": {
             "version": "3.12.1",
@@ -197,8 +197,8 @@
             "hash": "tree-v2:871a2c3e3fce5505337233418c37cdac1515c9824110bf602cbb8216b4fab7cb"
         },
         "pragmarx/google2fa": {
-            "version": "v9.0.0",
-            "hash": "tree-v2:6661a83fede3ef801435599f5358318363e7a13a6a4447d9abd38b10ce49605f"
+            "version": "v9.1.0",
+            "hash": "tree-v2:c4e6d87c5e09946a20bedb4a4c1b68f39385d1cef45b17bd9bec517e39479d2b"
         },
         "psr/clock": {
             "version": "1.0.0",
@@ -233,8 +233,8 @@
             "hash": "tree-v2:1854aa6d2cd53968d44c1fddcde547872925142ee6a5dea8d183b3a9e9551b7c"
         },
         "psy/psysh": {
-            "version": "v0.12.23",
-            "hash": "tree-v2:cac41415ebbaefe11446cd24cc76f63e0b3ecca546a099566541d2f2e025a2ca"
+            "version": "v0.12.24",
+            "hash": "tree-v2:c518e85e74d1aef81854220186172a87c7e1553652d35eff97655015389e5404"
         },
         "ralouphie/getallheaders": {
             "version": "3.0.3",
@@ -377,8 +377,8 @@
             "hash": "tree-v2:dc0d70dd175594a8a2468f2b694b8ce0780dbd4369e7020777aac056a66c25ca"
         },
         "symfony/serializer": {
-            "version": "v8.1.8",
-            "hash": "tree-v2:af5d415bda361730ecfbb542dc810a7d98ac00922c9fc625e740d3e221d645ef"
+            "version": "v8.1.9",
+            "hash": "tree-v2:aebae784bb2ec39d30926980fc00318abd7e22f94d3f8c99424dcab99d5e9cb7"
         },
         "symfony/service-contracts": {
             "version": "v3.7.3",
@@ -467,12 +467,12 @@
             "hash": "tree-v2:5a00e1682066ab97b3a25119d40996b35740ffdad40b7cbba66cdf9d3e7306a3"
         },
         "fruitcake/laravel-debugbar": {
-            "version": "v4.2.8",
-            "hash": "tree-v2:3f30dc998ccc795c504a7367bce53503275b968cc2a3664a3c573a14c03c2017"
+            "version": "v4.4.4",
+            "hash": "tree-v2:24f612a212db96c3d8746869a468fb89ca0d39da45b625941c3b3968faf68bc7"
         },
         "hamcrest/hamcrest-php": {
-            "version": "v2.1.1",
-            "hash": "tree-v2:8b11d442e6982460070110b31fc532c8fe524fc757990e5a4e75f32ebc1e8852"
+            "version": "v3.0.0",
+            "hash": "tree-v2:49f1c99167659adb6f9f9bf1aa7abca02fcd773f3c19041f7983dd50b83d85e7"
         },
         "iamcal/sql-parser": {
             "version": "v0.7",
@@ -483,12 +483,12 @@
             "hash": "tree-v2:5cc304e8a530449d8c745eaec902384554d1740d4e083032d5f9ce3ac1cf25e3"
         },
         "larastan/larastan": {
-            "version": "v3.10.0",
-            "hash": "tree-v2:933730b27c21aca0d7395139b5d7688168b62aac1c51d0ffbda7a1d3593d769e"
+            "version": "v3.13.0",
+            "hash": "tree-v2:e12ed6ea9e2fd88a18b7242587a63fedba8fcd177f356618f18393463d156da5"
         },
         "laravel/agent-detector": {
-            "version": "v2.0.2",
-            "hash": "tree-v2:4c49f9d340ccb3bc1454d18a5f0ba37165d7d5fb4b43a5a277f7a255487664a6"
+            "version": "v2.0.5",
+            "hash": "tree-v2:d0eda6db127038c6614cf1551b03c89a0ffa15416f79b26471cc73bad18563e0"
         },
         "laravel/boost": {
             "version": "v2.10.3",
@@ -507,8 +507,8 @@
             "hash": "tree-v2:f9d02c17b11ad280b6feb8753ff85b622573870aa21aa26ab8d126d9549c0a52"
         },
         "laravel/pint": {
-            "version": "v1.29.1",
-            "hash": "tree-v2:e9a598bd519de65e0ef1add4e62caa2efb4c444bdbe44f2feab5ec859d58118b"
+            "version": "v1.32.1",
+            "hash": "tree-v2:6011ed0cc05d840c85dac563c64a2461bc3c09f131e7c819f75abd73c9502f64"
         },
         "laravel/roster": {
             "version": "v1.0.0",
@@ -523,8 +523,8 @@
             "hash": "tree-v2:7c555b9f7eb265649d89769aa9b07bafc809d9e52d15ecdc3a84ee1c59fa767e"
         },
         "mockery/mockery": {
-            "version": "1.6.12",
-            "hash": "tree-v2:c6cb44811fb2674feeac51789852447cc0148c22f87a4557f608cd0d3f238836"
+            "version": "1.6.15",
+            "hash": "tree-v2:4bc0e2fbaea02a9469caa0f1105242dca2907278bc1fd8a3f9c6c8a2ddf920d7"
         },
         "myclabs/deep-copy": {
             "version": "1.14.0",
@@ -603,8 +603,8 @@
             "hash": "tree-v2:efb478b8e4b237d86ccc45e72d7ab5a51179d2e2528576d8b71f7853ac62894b"
         },
         "rector/rector": {
-            "version": "2.4.5",
-            "hash": "tree-v2:00d904973314d443aeb8871989444996bd8e31abd72e7b2adc903cb741720b07"
+            "version": "2.7.0",
+            "hash": "tree-v2:e8f59d6c70f4d83c2a49a512000935fdc04f7ef278c685ae7da3cac6b36f0d91"
         },
         "sebastian/cli-parser": {
             "version": "5.0.1",
