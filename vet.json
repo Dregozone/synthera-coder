@@ -514,10 +514,6 @@
             "version": "v1.0.0",
             "hash": "tree-v2:da430a9f3d9fb06a3812b0e8a116d8265a06dce1bfde4182a1de7154ba15ad67"
         },
-        "laravel/sail": {
-            "version": "v1.61.0",
-            "hash": "tree-v2:8f556a998c2516ac4b438bf219cdf745fa80faaf13239cb3e7cd63cead8cb1a6"
-        },
         "laravel/vet": {
             "version": "v0.2.1",
             "hash": "tree-v2:7c555b9f7eb265649d89769aa9b07bafc809d9e52d15ecdc3a84ee1c59fa767e"
