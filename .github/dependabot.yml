@@ -1,0 +1,20 @@
+version: 2
+registries:
+  # Flux Pro's private composer repository, so Dependabot's composer security updates can reach it.
+  # The two Dependabot secrets (Settings -> Secrets and variables -> Dependabot) are the names Flux
+  # uses in its own docs: your Flux account email and licence key.
+  flux-pro:
+    type: composer-repository
+    url: https://composer.fluxui.dev
+    username: ${{secrets.FLUX_USERNAME}}
+    password: ${{secrets.FLUX_LICENSE_KEY}}
+updates:
+  # Composer: no version-update pull requests (Life OS keeps the packages up to date), but security
+  # updates still run, and reach Flux Pro through the registry above.
+  - package-ecosystem: "composer"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+    registries:
+      - flux-pro
