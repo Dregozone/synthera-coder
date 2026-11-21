@@ -128,7 +128,7 @@ test('write file rejects paths outside the working directory', function (): void
         'contents' => 'x',
     ]));
 
-    expect($result)->toBe('Path is outside the working directory, or no working directory is set.')
+    expect($result)->toBe('../escape.php is outside the project folder.')
         ->and(AgentAction::query()->count())->toBe(0);
 });
 

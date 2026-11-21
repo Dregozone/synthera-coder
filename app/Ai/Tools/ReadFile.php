@@ -2,17 +2,16 @@
 
 namespace App\Ai\Tools;
 
-use App\Ai\Tools\Concerns\ResolvesSessionContext;
-use App\Services\FileService;
+use App\Ai\Tools\Concerns\UsesCodingTools;
+use App\Services\CodingTools;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
-use Illuminate\Support\Facades\File;
 use Laravel\Ai\Contracts\Tool;
 use Laravel\Ai\Tools\Request;
 use Stringable;
 
 class ReadFile implements Tool
 {
-    use ResolvesSessionContext;
+    use UsesCodingTools;
 
     public function __construct(protected ?int $chatSessionId = null) {}
 
@@ -21,7 +20,7 @@ class ReadFile implements Tool
      */
     public function description(): Stringable|string
     {
-        return 'Read a file (path relative to the project root).';
+        return 'Read a file (path relative to the project root). Returns JSON: path, contents, size (bytes) and lines.';
     }
 
     /**
@@ -29,20 +28,7 @@ class ReadFile implements Tool
      */
     public function handle(Request $request): Stringable|string
     {
-        $filePath = (new FileService)->resolveFilePath(
-            filePath: (string) $request['value'],
-            currentWorkingDirectory: $this->workingDirectory(),
-        );
-
-        if ($filePath === null) {
-            return 'Path is outside the working directory, or no working directory is set.';
-        }
-
-        if (! File::exists($filePath)) {
-            return "File not found: $filePath";
-        }
-
-        return File::get($filePath);
+        return $this->withCodingTools(fn (CodingTools $tools): string => self::asJson($tools->readFile((string) $request['value'])));
     }
 
     /**

@@ -3,14 +3,26 @@
 namespace App\Services;
 
 use App\Ai\Agents\LocalAgent;
+use App\Ai\Tools\CreateApiRoute;
+use App\Ai\Tools\CreateArtisanCommand;
+use App\Ai\Tools\CreateFile;
+use App\Ai\Tools\CreateLivewireComponent;
+use App\Ai\Tools\CreateRoute;
+use App\Ai\Tools\CreateTestFile;
+use App\Ai\Tools\EditFile;
 use App\Ai\Tools\FindComposerVersion;
+use App\Ai\Tools\GitDiff;
 use App\Ai\Tools\ListDirectory;
+use App\Ai\Tools\LocateError;
+use App\Ai\Tools\ProjectOverview;
 use App\Ai\Tools\ReadDoc;
 use App\Ai\Tools\ReadFile;
 use App\Ai\Tools\ReadPackageJson;
 use App\Ai\Tools\RunCommand;
+use App\Ai\Tools\RunProjectCheck;
 use App\Ai\Tools\SearchDocs;
 use App\Ai\Tools\SearchFiles;
+use App\Ai\Tools\SecurityReview;
 use App\Ai\Tools\WriteFile;
 use App\Models\ChatMessage;
 use App\Models\ChatSession;
@@ -33,6 +45,7 @@ class AgentRunner
         private readonly ChatService $chatService,
         private readonly AgentSetup $agentSetup,
         private readonly WebDocs $webDocs,
+        private readonly BoostMcp $boostMcp,
     ) {}
 
     /**
@@ -100,7 +113,7 @@ class AgentRunner
             timeout: $timeout,
             systemInstructions: $this->systemPrompt($session),
             conversation: $this->history($sessionId, $historyBeforeId),
-            availableTools: $this->toolsForMode($mode, $sessionId),
+            availableTools: $this->toolsForMode($mode, $session),
         );
 
         $this->webDocs->forgetCitations($sessionId);
@@ -171,13 +184,42 @@ class AgentRunner
      */
     public function systemPrompt(ChatSession $session): string
     {
-        return $this->agentSetup->forProfile(self::profileFor($session), [
+        $prompt = $this->agentSetup->forProfile(self::profileFor($session), [
             'working_directory' => (string) $session->current_working_directory,
             'top_level' => $this->workingDirectorySummary($session->current_working_directory),
         ], [
             'soul' => $session->soul,
             'guidelines' => $session->guidelines,
         ]);
+
+        $projectInstructions = $this->projectInstructions($session->current_working_directory);
+
+        return $projectInstructions === null ? $prompt : $prompt."\n\n".$projectInstructions;
+    }
+
+    /**
+     * The target project's own instructions for coding agents (its AGENTS.md),
+     * sent with every turn, cut short to fit a small model's context.
+     */
+    private function projectInstructions(?string $directory): ?string
+    {
+        if (! is_string($directory) || ! is_dir($directory)) {
+            return null;
+        }
+
+        $instructions = (new CodingTools($directory))->agentsInstructions();
+
+        if ($instructions === null) {
+            return null;
+        }
+
+        $limit = max(1, (int) config('synthera-coder.agents_md_max_characters', 12000));
+
+        if (mb_strlen($instructions) > $limit) {
+            $instructions = rtrim(mb_substr($instructions, 0, $limit))."\n\n(AGENTS.md cut short: ReadFile AGENTS.md for the rest)";
+        }
+
+        return "# Project instructions (AGENTS.md)\n\n".$instructions;
     }
 
     /**
@@ -305,18 +347,33 @@ class AgentRunner
      * Select the tools available for a chat mode. Ask mode is plain chat (no
      * tools, so weak models don't spin in a tool loop for simple messages);
      * Plan gets read-only tools; Agent gets everything including the mutating
-     * proposal tools.
+     * proposal tools. Both get the project's Laravel Boost tools, when it has
+     * Boost installed.
      *
      * @return array<int, object>
      */
-    private function toolsForMode(string $mode, int $sessionId): array
+    private function toolsForMode(string $mode, ChatSession $session): array
     {
+        $sessionId = $session->id;
+
         return match ($mode) {
             'ask' => [],
-            'plan' => $this->readOnlyTools($sessionId),
+            'plan' => [
+                ...$this->readOnlyTools($sessionId),
+                ...$this->boostMcp->tools($session->current_working_directory),
+            ],
             default => [
                 ...$this->readOnlyTools($sessionId),
+                ...$this->boostMcp->tools($session->current_working_directory),
+                new CreateFile($sessionId),
+                new EditFile($sessionId),
                 new WriteFile($sessionId),
+                new CreateRoute($sessionId),
+                new CreateApiRoute($sessionId),
+                new CreateLivewireComponent($sessionId),
+                new CreateArtisanCommand($sessionId),
+                new CreateTestFile($sessionId),
+                new RunProjectCheck($sessionId),
                 new RunCommand($sessionId),
             ],
         };
@@ -335,6 +392,10 @@ class AgentRunner
             new FindComposerVersion($sessionId),
             new SearchDocs($sessionId),
             new ReadDoc($sessionId),
+            new ProjectOverview($sessionId),
+            new GitDiff($sessionId),
+            new LocateError($sessionId),
+            new SecurityReview($sessionId),
         ];
     }
 

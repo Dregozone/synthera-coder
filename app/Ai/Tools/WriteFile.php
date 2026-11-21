@@ -2,12 +2,10 @@
 
 namespace App\Ai\Tools;
 
-use App\Ai\Tools\Concerns\ResolvesSessionContext;
-use App\Models\AgentAction;
-use App\Services\DiffService;
-use App\Services\FileService;
+use App\Ai\Tools\Concerns\UsesCodingTools;
+use App\Models\ChatSession;
+use App\Services\CodingTools;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
-use Illuminate\Support\Facades\File;
 use Laravel\Ai\Contracts\Tool;
 use Laravel\Ai\Tools\Request;
 use Stringable;
@@ -19,7 +17,7 @@ use Stringable;
  */
 class WriteFile implements Tool
 {
-    use ResolvesSessionContext;
+    use UsesCodingTools;
 
     public function __construct(protected ?int $chatSessionId = null) {}
 
@@ -30,45 +28,10 @@ class WriteFile implements Tool
 
     public function handle(Request $request): Stringable|string
     {
-        $session = $this->currentSession();
-
-        if ($session === null) {
-            return 'No working directory is set for this session.';
-        }
-
-        $relativePath = (string) ($request['path'] ?? '');
-
-        if (trim($relativePath) === '') {
-            return 'Provide a file path to write to.';
-        }
-
-        $absolutePath = (new FileService)->resolveFilePath(
-            filePath: $relativePath,
-            currentWorkingDirectory: $session->current_working_directory,
-        );
-
-        if ($absolutePath === null) {
-            return 'Path is outside the working directory, or no working directory is set.';
-        }
-
-        $newContents = (string) ($request['contents'] ?? '');
-        $previousContents = File::exists($absolutePath) ? File::get($absolutePath) : null;
-
-        $action = AgentAction::create([
-            'chat_session_id' => $session->id,
-            'type' => AgentAction::TYPE_WRITE,
-            'status' => AgentAction::STATUS_PENDING,
-            'payload' => [
-                'path' => $relativePath,
-                'absolute_path' => $absolutePath,
-                'contents' => $newContents,
-                'previous' => $previousContents,
-                'diff' => (new DiffService)->unified($previousContents ?? '', $newContents, $relativePath),
-                'is_new' => $previousContents === null,
-            ],
-        ]);
-
-        return "Proposed write to {$relativePath} as action #{$action->id}, awaiting user approval. Assume it will be applied and continue.";
+        return $this->withCodingTools(fn (CodingTools $tools, ChatSession $session): string => $this->proposeChange(
+            $session,
+            $tools->planWriteFile((string) ($request['path'] ?? ''), (string) ($request['contents'] ?? '')),
+        ));
     }
 
     public function schema(JsonSchema $schema): array

@@ -8,6 +8,7 @@ use App\Services\AgentActionExecutor;
 use App\Services\AgentRunner;
 use App\Services\ContextService;
 use Illuminate\Support\Facades\File;
+use Laravel\Ai\Prompts\AgentPrompt;
 
 function agentWorkspace(array $files = []): array
 {
@@ -22,6 +23,7 @@ function agentWorkspace(array $files = []): array
 
     $session = ChatSession::create([
         'current_working_directory' => $dir,
+        'confirmed_working_directory' => $dir,
         'current_model' => 'qwen/qwen3.5-9b',
         'current_chat_type' => 'agent',
     ]);
@@ -163,4 +165,28 @@ test('executor runs an approved command and records the output', function (): vo
     expect($action->fresh()->status)->toBe(AgentAction::STATUS_EXECUTED)
         ->and($result)->toContain('Exit code: 0')
         ->and($result)->toContain('PHP');
+});
+
+test('every turn sends the target project AGENTS.md as part of the system instructions', function (): void {
+    LocalAgent::fake(['Done.', 'Title']);
+
+    [$session] = agentWorkspace(['AGENTS.md' => "# Project rules\n\nWrite tests with Pest.\n"]);
+    $message = ChatMessage::create(['chat_session_id' => $session->id, 'type' => 'agent', 'by' => 'user', 'content' => 'Hi']);
+
+    app(AgentRunner::class)->runForUserMessage($session->id, $message->id);
+
+    LocalAgent::assertPrompted(fn (AgentPrompt $prompt): bool => str_contains((string) $prompt->agent->instructions(), "# Project instructions (AGENTS.md)\n\n# Project rules\n\nWrite tests with Pest."));
+});
+
+test('a long AGENTS.md is cut short, and a project without one adds nothing', function (): void {
+    config(['synthera-coder.agents_md_max_characters' => 20]);
+
+    [$long] = agentWorkspace(['AGENTS.md' => str_repeat('Rule. ', 50)]);
+    [$none] = agentWorkspace();
+
+    $runner = app(AgentRunner::class);
+
+    expect($runner->systemPrompt($long))->toContain('(AGENTS.md cut short: ReadFile AGENTS.md for the rest)')
+        ->and($runner->systemPrompt($long))->not->toContain(str_repeat('Rule. ', 5))
+        ->and($runner->systemPrompt($none))->not->toContain('AGENTS.md');
 });

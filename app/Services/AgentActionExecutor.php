@@ -21,6 +21,11 @@ class AgentActionExecutor
      */
     public function execute(AgentAction $action): string
     {
+        // Nothing is changed in a folder the user has not confirmed; the action stays pending.
+        if ($action->chatSession?->hasConfirmedWorkingDirectory() !== true) {
+            return 'Not applied: Confirm the project folder first.';
+        }
+
         try {
             $result = $action->type === AgentAction::TYPE_WRITE
                 ? $this->applyWrite($action)

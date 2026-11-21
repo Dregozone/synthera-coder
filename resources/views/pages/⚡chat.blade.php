@@ -11,11 +11,13 @@ use App\Services\AgentSetup;
 use App\Services\AppSettings;
 use App\Services\BackgroundLauncher;
 use App\Services\ChatService;
+use App\Services\CodingTools;
 use App\Services\ContextService;
 use App\Services\DiffService;
 use App\Services\LmStudio;
 use App\Services\ProjectDirectories;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Lottery;
 use Illuminate\Support\Str;
@@ -70,6 +72,9 @@ new #[Title('Agentic Chat')] class extends Component
     public string $selectedProject = '';
 
     public array $availableProjects = [];
+
+    // Whether the user has confirmed the selected folder; nothing is changed in one they haven't.
+    public bool $workingDirectoryConfirmed = false;
 
     // Approximate token accounting for the conversation actually sent to the
     // model, measured against the selected model's context window.
@@ -245,6 +250,42 @@ new #[Title('Agentic Chat')] class extends Component
             ->all();
     }
 
+    /**
+     * The selected folder, to confirm before any change is applied in it.
+     *
+     * @return array{name: string, path: string, files: int, bytes: int, size: string}|null
+     */
+    #[Computed]
+    public function projectDetails(): ?array
+    {
+        return $this->folderSummary($this->selectedProject);
+    }
+
+    /**
+     * The folder picked in the switch-project dialog, shown before switching to it.
+     *
+     * @return array{name: string, path: string, files: int, bytes: int, size: string}|null
+     */
+    #[Computed]
+    public function switchProjectDetails(): ?array
+    {
+        return $this->folderSummary($this->tempSelectedProject);
+    }
+
+    /**
+     * A folder's name, full path, file count and size, counted once a minute at most.
+     *
+     * @return array{name: string, path: string, files: int, bytes: int, size: string}|null
+     */
+    private function folderSummary(string $path): ?array
+    {
+        if ($path === '' || ! is_dir($path)) {
+            return null;
+        }
+
+        return Cache::remember('synthera.folder-summary.'.md5($path), 60, fn (): array => (new CodingTools($path))->summary());
+    }
+
     #[Computed]
     public function recentSessions(): Collection
     {
@@ -322,7 +363,7 @@ new #[Title('Agentic Chat')] class extends Component
     private function loadSessionData(): void
     {
         $session = ChatSession::query()
-            ->select(['id', 'title', 'number_of_messages', 'current_model', 'current_chat_type', 'current_working_directory', 'soul', 'guidelines'])
+            ->select(['id', 'title', 'number_of_messages', 'current_model', 'current_chat_type', 'current_working_directory', 'confirmed_working_directory', 'soul', 'guidelines'])
             ->find($this->sessionId);
 
         if (! $session) {
@@ -335,6 +376,7 @@ new #[Title('Agentic Chat')] class extends Component
         $this->numberOfMessages = $session->number_of_messages ?? 0;
         $this->selectedProject = $session->current_working_directory ?? '';
         $this->tempSelectedProject = $this->selectedProject;
+        $this->workingDirectoryConfirmed = $session->hasConfirmedWorkingDirectory();
         $this->currentSoul = $session->soul ?? '';
         $this->guidelinesCustomized = $session->guidelines !== null;
         $this->selectedGuidelines = $session->guidelines ?? $this->modeGuidelines();
@@ -596,7 +638,7 @@ new #[Title('Agentic Chat')] class extends Component
             ->where('status', AgentAction::STATUS_PENDING)
             ->find($actionId);
 
-        if (! $action) {
+        if (! $action || ! $this->ensureWorkingDirectoryConfirmed()) {
             return;
         }
 
@@ -677,6 +719,10 @@ new #[Title('Agentic Chat')] class extends Component
 
     public function approveAllActions(AgentActionExecutor $executor): void
     {
+        if (! $this->ensureWorkingDirectoryConfirmed()) {
+            return;
+        }
+
         foreach ($this->pendingActions as $action) {
             $result = $executor->execute($action);
 
@@ -799,15 +845,49 @@ new #[Title('Agentic Chat')] class extends Component
         }
     }
 
+    /**
+     * Whether changes may be applied: only in a folder the user has confirmed.
+     */
+    private function ensureWorkingDirectoryConfirmed(): bool
+    {
+        if ($this->workingDirectoryConfirmed) {
+            return true;
+        }
+
+        $this->sendToast('Confirm the project folder before applying changes to it.', '', 'warning');
+
+        return false;
+    }
+
+    /**
+     * Confirm the selected folder (its full path, file count and size are on
+     * screen) as the one the agent's approved changes are applied in.
+     */
+    public function confirmWorkingDirectory(): void
+    {
+        if ($this->selectedProject === '' || ! is_dir($this->selectedProject)) {
+            $this->sendToast('Select a working directory first.', '', 'danger');
+
+            return;
+        }
+
+        ChatSession::query()
+            ->whereKey($this->sessionId)
+            ->update(['confirmed_working_directory' => $this->selectedProject]);
+
+        $this->addMessage(type: 'info', by: 'user', content: 'Confirmed the project folder: '.$this->selectedProject);
+    }
+
     public function changeWorkingDirectory(): void
     {
         $this->selectedProject = $this->tempSelectedProject;
         // Chosen here: a project from the link no longer applies.
         $this->project = '';
 
+        // Switched to with its full path, file count and size on screen: confirmed.
         ChatSession::query()
             ->whereKey($this->sessionId)
-            ->update(['current_working_directory' => $this->selectedProject]);
+            ->update(['current_working_directory' => $this->selectedProject, 'confirmed_working_directory' => $this->selectedProject]);
 
         $this->addMessage(type: 'info', by: 'user', content: 'Changed working directory to: '.$this->selectedProject);
 
@@ -1111,7 +1191,7 @@ new #[Title('Agentic Chat')] class extends Component
     {{-- Middle: the proposed changes, to review and accept, run, send back or reject --}}
     @if ($hasChanges)
         <section class="flex-1 min-w-0 h-screen py-4" data-test="changes-panel">
-            @include('pages.includes.changes-panel', ['actions' => $this->pendingActions, 'diffs' => $this->pendingDiffs])
+            @include('pages.includes.changes-panel', ['actions' => $this->pendingActions, 'diffs' => $this->pendingDiffs, 'confirmProject' => $workingDirectoryConfirmed ? null : $this->projectDetails])
         </section>
     @endif
 
@@ -1155,6 +1235,12 @@ new #[Title('Agentic Chat')] class extends Component
                     <flux:subheading>Working Directory</flux:subheading>
 
                     <div class="flex items-center gap-2">
+                        @if ($selectedProject !== '' && ! $workingDirectoryConfirmed)
+                            <flux:modal.trigger name="change-directory">
+                                <flux:badge size="sm" color="amber" as="button" title="Confirm this folder before changes are applied in it" data-test="folder-not-confirmed">Not confirmed</flux:badge>
+                            </flux:modal.trigger>
+                        @endif
+
                         <flux:modal.trigger name="change-directory">
                             <div class="flex items-center gap-1 cursor-pointer">
                                 <flux:icon.folder-open class="size-4 text-zinc-600 dark:text-zinc-300" />
@@ -1166,18 +1252,22 @@ new #[Title('Agentic Chat')] class extends Component
                             <div class="space-y-6">
                                 <div>
                                     <flux:heading size="lg">Change Directory</flux:heading>
-                                    <flux:text class="mt-2">Select a project to work on.</flux:text>
+                                    <flux:text class="mt-2">Select a project to work on, and check it is the right folder: approved changes are written here.</flux:text>
                                 </div>
 
-                                <flux:select wire:model="tempSelectedProject" label="Select a project" placeholder="Select a project">
+                                <flux:select wire:model.live="tempSelectedProject" label="Select a project" placeholder="Select a project">
                                     @foreach ($availableProjects as $project => $path)
                                         <flux:select.option :value="$path">{{ $project }}</flux:select.option>
                                     @endforeach
                                 </flux:select>
 
+                                @if ($details = $this->switchProjectDetails)
+                                    @include('pages.includes.project-details', ['details' => $details, 'test' => 'switch-project-details'])
+                                @endif
+
                                 <div class="flex">
                                     <flux:spacer />
-                                    <flux:button type="submit" variant="primary" wire:click="changeWorkingDirectory()" x-on:click="$flux.modal('change-directory').close()">Switch project</flux:button>
+                                    <flux:button type="submit" variant="primary" wire:click="changeWorkingDirectory()" x-on:click="$flux.modal('change-directory').close()">{{ $tempSelectedProject !== '' && $tempSelectedProject === $selectedProject ? 'Confirm folder' : 'Switch project' }}</flux:button>
                                 </div>
                             </div>
                         </flux:modal>
