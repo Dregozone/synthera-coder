@@ -13,6 +13,7 @@
         "laravel/ai": "^1.3",
         "laravel/fortify": "^1.34",
         "laravel/framework": "^13.0",
+        "laravel/mcp": "^1.1",
         "laravel/tinker": "^3.0",
         "livewire/blaze": "1.0.21",
         "livewire/flux": "^2.13.1",

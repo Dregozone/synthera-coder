@@ -199,9 +199,52 @@ return [
         'pint' => ['group' => 'Tests', 'label' => 'Pint', 'icon' => 'sparkles', 'command' => 'vendor/bin/pint'],
         'git-status' => ['group' => 'Git', 'label' => 'Status', 'icon' => 'document-magnifying-glass', 'command' => 'git status'],
         'git-log' => ['group' => 'Git', 'label' => 'Log', 'icon' => 'list-bullet', 'command' => 'git log --oneline -15'],
+        'git-diff' => ['group' => 'Git', 'label' => 'Diff vs main', 'icon' => 'document-magnifying-glass', 'command' => 'git diff main...HEAD'],
         'git-pull' => ['group' => 'Git', 'label' => 'Pull', 'icon' => 'arrow-down', 'command' => 'git pull --ff-only'],
         'git-push' => ['group' => 'Git', 'label' => 'Push', 'icon' => 'arrow-up', 'command' => 'git push'],
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Quality Checks
+    |--------------------------------------------------------------------------
+    |
+    | The checks the agent may propose running in the target project (the
+    | RunProjectCheck tool, CodingTools::runCheck), by key. As with the
+    | sidebar commands, the model names a key, never a command line, and the
+    | user approves each run. Rector runs as a dry run so it only reports.
+    |
+    */
+    'quality_checks' => [
+        'pint' => 'php vendor/bin/pint',
+        'rector' => 'php vendor/bin/rector process --dry-run',
+        'phpstan' => 'php vendor/bin/phpstan analyse --no-progress',
+        'tests' => 'php artisan test --compact',
+        'routes' => 'php artisan route:list --except-vendor',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | MCP: Laravel Boost
+    |--------------------------------------------------------------------------
+    |
+    | When the target project has Laravel Boost installed, Plan and Agent mode
+    | start its MCP server (`php artisan boost:mcp`, over stdio) and give the
+    | model the Boost tools listed here: read-only ones only (no tinker, no
+    | writing rules). Its tools join the turn as `mcp_tools_<name>`. Turn it
+    | off with SYNTHERA_BOOST_MCP=false.
+    |
+    */
+    'mcp' => [
+        'boost' => [
+            'enabled' => (bool) env('SYNTHERA_BOOST_MCP', true),
+            'tools' => ['search-docs', 'database-schema', 'database-connections', 'last-error', 'read-log-entries', 'browser-logs', 'get-absolute-url'],
+            'timeout' => (int) env('SYNTHERA_BOOST_MCP_TIMEOUT', 30),
+        ],
+    ],
+
+    // How much of the target project's AGENTS.md goes into the system prompt (characters).
+    'agents_md_max_characters' => (int) env('SYNTHERA_AGENTS_MD_MAX_CHARACTERS', 12000),
 
     // The longest a project command may run (seconds).
     'command_timeout' => (int) env('SYNTHERA_COMMAND_TIMEOUT', 1800),

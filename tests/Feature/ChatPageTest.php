@@ -201,6 +201,7 @@ test('approving a proposed write applies it and triggers a continuation turn', f
 
     $session = ChatSession::create([
         'current_working_directory' => $dir,
+        'confirmed_working_directory' => $dir,
         'current_model' => 'qwen/qwen3.5-9b',
         'current_chat_type' => 'agent',
     ]);

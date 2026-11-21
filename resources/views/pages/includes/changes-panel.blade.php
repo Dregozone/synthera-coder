@@ -24,12 +24,25 @@
             </flux:text>
         </div>
 
-        <flux:button size="sm" variant="primary" icon="check" wire:click="approveAllActions" wire:loading.attr="disabled">
+        <flux:button size="sm" variant="primary" icon="check" wire:click="approveAllActions" wire:loading.attr="disabled" :disabled="$confirmProject !== null">
             Accept all
         </flux:button>
     </div>
 
     <div class="grow overflow-y-auto p-3 flex flex-col gap-3">
+        {{-- Nothing is applied in a folder the user has not confirmed. --}}
+        @if ($confirmProject)
+            <flux:callout icon="folder-open" color="amber" data-test="confirm-project">
+                <flux:callout.heading>Confirm the project folder before applying changes</flux:callout.heading>
+                <flux:callout.text>
+                    @include('pages.includes.project-details', ['details' => $confirmProject, 'test' => 'confirm-project-details'])
+                </flux:callout.text>
+                <x-slot name="actions">
+                    <flux:button size="sm" variant="primary" icon="check" wire:click="confirmWorkingDirectory">This is the right folder</flux:button>
+                </x-slot>
+            </flux:callout>
+        @endif
+
         @foreach ($actions as $action)
             @php($isWrite = $action->type === \App\Models\AgentAction::TYPE_WRITE)
             @php($diff = $diffs[$action->id] ?? null)
@@ -118,7 +131,7 @@
                     @endif
 
                     <div class="flex flex-wrap items-center gap-2 px-3 py-2 border-t border-zinc-200 dark:border-zinc-700 bg-zinc-50/60 dark:bg-zinc-900/40">
-                        <flux:button size="sm" variant="primary" :icon="$isWrite ? 'check' : 'play'" wire:click="approveAction({{ $action->id }})" wire:loading.attr="disabled">
+                        <flux:button size="sm" variant="primary" :icon="$isWrite ? 'check' : 'play'" wire:click="approveAction({{ $action->id }})" wire:loading.attr="disabled" :disabled="$confirmProject !== null">
                             {{ $isWrite ? 'Accept' : 'Run' }}
                         </flux:button>
                         <flux:button size="sm" variant="outline" icon="chat-bubble-left-ellipsis" x-on:click="requesting = ! requesting">
