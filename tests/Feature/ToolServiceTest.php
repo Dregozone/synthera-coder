@@ -29,7 +29,7 @@ test('tool service exposes tool definitions for agent prompts', function (): voi
 
     expect($readFileDefinition)->not->toBeNull();
     expect($readFileDefinition['name'])->toBe('ReadFile');
-    expect($readFileDefinition['description'])->toBe('Read a file (path relative to the project root).');
+    expect($readFileDefinition['description'])->toBe('Read a file (path relative to the project root). Returns JSON: path, contents, size (bytes) and lines.');
     expect($readFileDefinition['tool'])->toBeInstanceOf(ReadFile::class);
 });
 
@@ -42,7 +42,7 @@ test('read file tool reads relative paths from the latest session working direct
         'value' => 'composer.json',
     ]));
 
-    expect($contents)->toBe(File::get(base_path('composer.json')));
+    expect(json_decode((string) $contents, true)['contents'])->toBe(File::get(base_path('composer.json')));
 });
 
 test('read file tool preserves absolute paths inside the working directory', function (): void {
@@ -56,7 +56,7 @@ test('read file tool preserves absolute paths inside the working directory', fun
         'value' => $absolutePath,
     ]));
 
-    expect($contents)->toBe(File::get($absolutePath));
+    expect(json_decode((string) $contents, true)['contents'])->toBe(File::get($absolutePath));
 });
 
 test('read file tool rejects paths that escape the working directory', function (): void {
@@ -74,6 +74,6 @@ test('read file tool rejects paths that escape the working directory', function 
         'value' => '../composer.json',
     ]));
 
-    expect((string) $escapingAbsolute)->toBe('Path is outside the working directory, or no working directory is set.')
-        ->and((string) $escapingRelative)->toBe('Path is outside the working directory, or no working directory is set.');
+    expect((string) $escapingAbsolute)->toBe(base_path('composer.json').' is outside the project folder.')
+        ->and((string) $escapingRelative)->toBe('../composer.json is outside the project folder.');
 });

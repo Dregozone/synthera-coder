@@ -62,6 +62,7 @@ Everything listed below is **currently implemented** and working.
 
 - **Sibling-project selector** — Synthera Coder scans the parent directory on startup and presents every sibling folder as a selectable working directory, sorted alphabetically.
 - **Persistent working directory** — the selected project path is saved per session and restored when you return.
+- **Confirm the folder before anything changes** — the switch-project dialog shows the folder's name, full path, file count and size (leaving out `vendor`, `node_modules` and hidden folders) before you switch. Nothing the agent proposes is applied in a folder you have not confirmed: a project opened from a link shows **Not confirmed** in the sidebar, and the changes panel asks you to confirm it first.
 - **Working directory indicator** — the active path is always visible in the sidebar with a folder-open icon.
 - **Worktrees too** — a project's git worktrees (`<project>.worktrees/<branch>`, as tools like Life OS make them for an issue) are listed as `project › branch`.
 - **Open on a project from a link** — `?project=wifone` (or `?project=wifone.worktrees/issue-12-dark-mode`) opens that project, carrying on with its most recent chat (or starting one). An unknown name is ignored.
@@ -74,7 +75,7 @@ Run common maintenance commands against the selected project directly from the U
 - **Composer** — `composer audit`, `composer outdated --direct`, `composer update`.
 - **npm** — `npm audit`, `npm audit fix`, `npm outdated`, `npm update`.
 - **Tests** — `php artisan test`, Pint.
-- **Git** — status, log, pull (fast-forward only) and push.
+- **Git** — status, log, diff against main (`git diff main...HEAD`, to review a feature branch), pull (fast-forward only) and push.
 
 - **Only these can run** — the page sends a command's key, never a command line; the list lives in `config/synthera-coder.php` (`commands`).
 - **In the background, shown live** — each runs in its own process (no queue worker needed, on Windows/Herd or macOS/Linux), so a long `composer update` is not cut off by the web server; its output appears as it comes, one command at a time.
@@ -88,14 +89,33 @@ Currently implemented tools:
 
 | Tool | Description |
 |---|---|
-| `ReadFile` | Checks whether a file exists and reads its contents, resolving paths relative to the active working directory. |
+| `ReadFile` | Reads a file in the working directory, returned as JSON with its size in bytes and its line count. |
 | `FindComposerVersion` | Reads `composer.lock` in the active project and returns the installed version of any named package. |
 | `SearchDocs` | Searches the snapshots of the approved docs sites and the stubs; each hit names the doc to read and the URL to cite. See [Web Docs](#web-docs-approved-docs-sites-read-from-snapshots). |
 | `ReadDoc` | Reads one docs page or stub (or one section of it), headed by its source URL. |
+| `ProjectOverview` | The project's name, description, Laravel/Livewire versions, README intro, Composer and npm dependencies, and its markdown docs. |
+| `GitDiff` | What a branch changes since it left the base branch (`git diff main...feature-branch`), for review. |
+| `LocateError` | Reads a pasted error or stack trace: its message and each project `file:line` it points at, with the code around it. |
+| `SecurityReview` | Lists risky code by file and line: mass assignment from the request, raw SQL built from variables, unescaped Blade, `env()` outside config, `eval`/`exec`. |
+| `CreateFile` / `EditFile` | Propose a new file, or replacing one passage of a file (it must match exactly once). |
+| `CreateRoute` / `CreateApiRoute` | Propose a route in `routes/web.php` (GET: a closure, a Livewire page or `Controller@method`) or `routes/api.php`. With middleware or a prefix, it joins the group that has exactly those, or starts one. |
+| `CreateLivewireComponent` | Proposes a Livewire 4 single-file component (`pages::users.index` or `post.create`), from the stub when no contents are given. |
+| `CreateArtisanCommand` | Proposes a command class in `app/Console/Commands` from a signature (`do:something {userId}`) and the body of `handle()`. |
+| `CreateTestFile` | Proposes a Pest test for the class in a file, with a todo for each public method. |
+| `RunProjectCheck` | Proposes running a configured check (`tests`, `pint`, `rector`, `phpstan`, `routes`); its output comes back so the agent can fix what fails. |
+| `WriteFile` / `RunCommand` | Propose rewriting a whole file, or running any other command. |
+
+The `Create…`, `Edit…`, `Write…` and `Run…` tools only **propose**: you approve each change (with its diff) or command before it is applied. All of them sit on one service, `App\Services\CodingTools`, which takes the input, checks it (a path outside the project, a route path that is not a path, a passage that matches twice are refused with a message the model can act on) and returns the result, so every task is tested by calling it directly (`tests/Feature/CodingToolsTest.php`, and `CodingScenariosTest.php` for the coding checklist: describing the project, its dependencies and routes, a `/testing` route, a Livewire CRUD page, docs, tests, an artisan command, quality checks and their failures, a pasted error, a git diff and a security review).
+
+#### Laravel Boost over MCP
+
+When the selected project has [Laravel Boost](https://github.com/laravel/boost) installed, Plan and Agent mode start its MCP server (`php artisan boost:mcp`) over stdio, through `laravel/mcp`'s client, and give the model Boost's read-only tools as `mcp_tools_<name>`: `search-docs` (docs for the exact package versions the project uses), `database-schema`, `database-connections`, `last-error`, `read-log-entries`, `browser-logs` and `get-absolute-url`. Tinker and rule-writing are left out. The server runs with the project's own `.env`, not Synthera Coder's. If it will not start, the turn goes on without it. The list lives in `config/synthera-coder.php` (`mcp.boost.tools`); `SYNTHERA_BOOST_MCP=false` turns it off.
 
 ### Agent Setup
 
 How the agent behaves and sounds lives in plain markdown files in `app/Ai/Setup/` — a **Soul** (persona), **Guidelines** (standing rules) and **Instructions** (the task) — chosen per mode in config. Each chat picks its own soul and guidelines from the composer or the sidebar's **Agent** card (with a preview of the exact system prompt), and the **setup page** (`/setup`) edits the files and the defaults for new chats. Change the agent's behaviour by editing a markdown file, not PHP. See [Agent Setup: Soul, Guidelines & Instructions](#agent-setup-soul-guidelines--instructions).
+
+The selected project's own **`AGENTS.md`** is added to the end of the system prompt on every turn (and shows in **Preview**), so the agent follows that project's conventions. A long one is cut to `SYNTHERA_AGENTS_MD_MAX_CHARACTERS` (default 12000), with a note to `ReadFile AGENTS.md` for the rest.
 
 ### Model Selection
 
@@ -458,6 +478,8 @@ synthera-coder/
 │       ├── DocSources.php     # The approved docs sites (config + setup page edits)
 │       ├── WebDocs.php        # Refreshes, searches and reads the docs snapshots and stubs
 │       ├── ChatService.php    # Orchestrates the agentic loop
+│       ├── CodingTools.php    # The coding tasks the agent's tools sit on (files, routes, checks, diffs…)
+│       ├── BoostMcp.php       # The target project's Laravel Boost MCP tools
 │       ├── ContextService.php # Reads/writes per-session context files
 │       ├── FileService.php    # Resolves absolute/relative file paths
 │       └── ToolService.php    # Auto-discovers & dispatches tools

@@ -54,3 +54,24 @@ function something()
 {
     // ..
 }
+
+/**
+ * Note a temporary project folder a test made (given one), or hand back every
+ * folder noted and forget them (given none), so a test can remove its own.
+ *
+ * @return list<string>
+ */
+function temporaryProjects(?string $dir = null): array
+{
+    static $dirs = [];
+
+    if ($dir !== null) {
+        $dirs[] = $dir;
+
+        return $dirs;
+    }
+
+    [$noted, $dirs] = [$dirs, []];
+
+    return $noted;
+}
