@@ -20,9 +20,27 @@ step() {
 
 said+=("$(php -r 'echo "PHP ", PHP_VERSION;' 2>/dev/null || echo 'PHP missing')")
 
+composer_install() {
+  composer install --no-interaction --prefer-dist --no-progress && return 0
+  # GitHub's zips of other repositories are refused in cloud sessions (its proxy only serves the
+  # repositories attached to the session); git clones work. Zip-only packages (phpstan) are built
+  # from git by cloud-dists.php into a temporary copy of the lock file; the real one is untouched.
+  echo "== zip downloads failed: retrying from git sources"
+  local made=0 code=0
+  grep -qx 'composer.cloud.*' .git/info/exclude 2>/dev/null || echo 'composer.cloud.*' >> .git/info/exclude 2>/dev/null
+  if [ -f .claude/hooks/cloud-dists.php ]; then made="$(php .claude/hooks/cloud-dists.php)"; fi
+  if [ "${made:-0}" != "0" ] && [ -f composer.cloud.json ]; then
+    COMPOSER=composer.cloud.json composer install --no-interaction --prefer-source --no-progress || code=$?
+    rm -f composer.cloud.json composer.cloud.lock
+  else
+    composer install --no-interaction --prefer-source --no-progress || code=$?
+  fi
+  return $code
+}
+
 if [ -f composer.json ]; then
   if [ ! -f vendor/autoload.php ] || [ composer.lock -nt vendor/autoload.php ]; then
-    step "composer install" composer install --no-interaction --prefer-dist --no-progress
+    step "composer install" composer_install
   else
     said+=("ok: composer packages already installed")
   fi
